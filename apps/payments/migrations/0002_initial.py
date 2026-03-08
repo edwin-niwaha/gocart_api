@@ -10,40 +10,34 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("addresses", "0001_initial"),
+        ("payments", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name="customeraddress",
+            model_name="payment",
             name="user",
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
-                related_name="addresses",
+                related_name="payments",
                 to=settings.AUTH_USER_MODEL,
             ),
         ),
         migrations.AddIndex(
-            model_name="customeraddress",
+            model_name="payment",
             index=models.Index(
-                fields=["created_at"], name="addresses_c_created_4c4c08_idx"
+                fields=["reference"], name="payments_pa_referen_75358f_idx"
             ),
         ),
         migrations.AddIndex(
-            model_name="customeraddress",
-            index=models.Index(
-                fields=["is_default"], name="addresses_c_is_defa_570f0d_idx"
-            ),
+            model_name="payment",
+            index=models.Index(fields=["status"], name="payments_pa_status_7ad4af_idx"),
         ),
         migrations.AddIndex(
-            model_name="customeraddress",
-            index=models.Index(fields=["city"], name="addresses_c_city_0ca99b_idx"),
-        ),
-        migrations.AddIndex(
-            model_name="customeraddress",
+            model_name="payment",
             index=models.Index(
-                fields=["country"], name="addresses_c_country_2d2c4a_idx"
+                fields=["created_at"], name="payments_pa_created_b8a300_idx"
             ),
         ),
     ]

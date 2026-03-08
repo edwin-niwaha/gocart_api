@@ -10,40 +10,30 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("addresses", "0001_initial"),
+        ("notifications", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name="customeraddress",
+            model_name="notification",
             name="user",
             field=models.ForeignKey(
                 on_delete=django.db.models.deletion.CASCADE,
-                related_name="addresses",
+                related_name="notifications",
                 to=settings.AUTH_USER_MODEL,
             ),
         ),
         migrations.AddIndex(
-            model_name="customeraddress",
+            model_name="notification",
             index=models.Index(
-                fields=["created_at"], name="addresses_c_created_4c4c08_idx"
+                fields=["is_read"], name="notificatio_is_read_9edb86_idx"
             ),
         ),
         migrations.AddIndex(
-            model_name="customeraddress",
+            model_name="notification",
             index=models.Index(
-                fields=["is_default"], name="addresses_c_is_defa_570f0d_idx"
-            ),
-        ),
-        migrations.AddIndex(
-            model_name="customeraddress",
-            index=models.Index(fields=["city"], name="addresses_c_city_0ca99b_idx"),
-        ),
-        migrations.AddIndex(
-            model_name="customeraddress",
-            index=models.Index(
-                fields=["country"], name="addresses_c_country_2d2c4a_idx"
+                fields=["created_at"], name="notificatio_created_46ad24_idx"
             ),
         ),
     ]

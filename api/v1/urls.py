@@ -1,7 +1,5 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-
 from apps.addresses import views as address_views
 from apps.cart import views as cart_views
 from apps.orders import views as order_views
@@ -38,12 +36,12 @@ router.register("coupons", promotions_views.CouponViewSet, basename="coupons")
 router.register("notifications", notification_views.NotificationViewSet, basename="notifications")
 
 urlpatterns = [
-    # Auth
-    path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("auth/", include("dj_rest_auth.urls")),
-    path("auth/registration/", include("dj_rest_auth.registration.urls")),
+    # Custom auth
     path("auth/", include("apps.users.urls")),
+
+    # Optional: keep dj-rest-auth on a different prefix to avoid collisions
+    path("rest-auth/", include("dj_rest_auth.urls")),
+    path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
 
     # Resources
     path("", include(router.urls)),
