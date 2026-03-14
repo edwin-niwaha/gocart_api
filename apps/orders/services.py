@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils.text import slugify
 
 from apps.inventory.services import fulfill_order_stock, release_order_stock, reserve_order_stock
+from apps.products.models import ProductVariant
 from .models import Order, OrderItem
 
 
@@ -21,12 +22,13 @@ def create_order(*, user, **validated_data) -> Order:
 
 
 @transaction.atomic
-def add_order_item(*, order, product, quantity: int) -> OrderItem:
+def add_order_item(*, order: Order, variant: ProductVariant, quantity: int) -> OrderItem:
     item = OrderItem.objects.create(
         order=order,
-        product=product,
+        product=variant.product,
+        variant=variant,
         quantity=quantity,
-        unit_price=product.price,
+        unit_price=variant.price,
     )
     order.recalculate_total_price()
     return item
@@ -34,11 +36,15 @@ def add_order_item(*, order, product, quantity: int) -> OrderItem:
 
 @transaction.atomic
 def update_order_item(*, item: OrderItem, **validated_data) -> OrderItem:
+    variant = validated_data.get("variant")
+
     for attr, value in validated_data.items():
         setattr(item, attr, value)
 
-    if "product" in validated_data and "unit_price" not in validated_data:
-        item.unit_price = item.product.price
+    if variant is not None:
+        item.product = variant.product
+        if "unit_price" not in validated_data:
+            item.unit_price = variant.price
 
     item.save()
     item.order.recalculate_total_price()

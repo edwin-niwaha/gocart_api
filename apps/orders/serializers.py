@@ -4,8 +4,10 @@ from .models import Order, OrderItem
 
 
 class OrderItemReadSerializer(serializers.ModelSerializer):
-    product_title = serializers.CharField(source="product.title", read_only=True)
+    product_title = serializers.CharField(read_only=True)
     product_slug = serializers.CharField(source="product.slug", read_only=True)
+    variant_name = serializers.CharField(read_only=True)
+    variant_sku = serializers.CharField(read_only=True)
     line_total = serializers.ReadOnlyField()
 
     class Meta:
@@ -15,6 +17,9 @@ class OrderItemReadSerializer(serializers.ModelSerializer):
             "product",
             "product_title",
             "product_slug",
+            "variant",
+            "variant_name",
+            "variant_sku",
             "quantity",
             "unit_price",
             "line_total",
@@ -64,15 +69,31 @@ class OrderItemWriteSerializer(serializers.ModelSerializer):
         model = OrderItem
         fields = (
             "order",
-            "product",
+            "variant",
             "quantity",
         )
 
     def validate(self, attrs):
         request = self.context["request"]
         order = attrs["order"]
+        variant = attrs["variant"]
 
         if not request.user.is_staff and order.user != request.user:
             raise serializers.ValidationError("You cannot modify another user's order.")
+
+        if variant.product_id is None:
+            raise serializers.ValidationError("Selected variant is invalid.")
+
+        if not variant.is_active:
+            raise serializers.ValidationError("Selected variant is not active.")
+
+        if variant.stock_quantity < attrs["quantity"]:
+            raise serializers.ValidationError("Insufficient stock for this variant.")
+
+        max_qty = variant.max_quantity_per_order
+        if max_qty is not None and attrs["quantity"] > max_qty:
+            raise serializers.ValidationError(
+                f"You can only order up to {max_qty} of this variant."
+            )
 
         return attrs

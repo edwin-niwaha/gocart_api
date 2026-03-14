@@ -40,6 +40,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         queryset = Order.objects.select_related("user").prefetch_related(
             "items",
             "items__product",
+            "items__variant",
         )
         if self.request.user.is_staff:
             return queryset
@@ -62,11 +63,16 @@ class OrderViewSet(viewsets.ModelViewSet):
 class OrderItemViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrOwner]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["order", "product"]
+    filterset_fields = ["order", "product", "variant"]
     ordering_fields = ["created_at", "quantity"]
 
     def get_queryset(self):
-        queryset = OrderItem.objects.select_related("order", "product", "order__user")
+        queryset = OrderItem.objects.select_related(
+            "order",
+            "product",
+            "variant",
+            "order__user",
+        )
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(order__user=self.request.user)
@@ -82,7 +88,7 @@ class OrderItemViewSet(viewsets.ModelViewSet):
 
         item = add_order_item(
             order=serializer.validated_data["order"],
-            product=serializer.validated_data["product"],
+            variant=serializer.validated_data["variant"],
             quantity=serializer.validated_data["quantity"],
         )
         output = OrderItemReadSerializer(item, context=self.get_serializer_context())
