@@ -1,6 +1,6 @@
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.response import Response
-from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import Category, Product
 from .serializers import CategorySerializer, ProductSerializer
@@ -48,20 +48,24 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.select_related("category").all().order_by("-created_at")
+    queryset = Product.objects.select_related("category").prefetch_related("variants").all().order_by("-created_at")
     serializer_class = ProductSerializer
     permission_classes = [IsAdminOrReadOnly]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["category", "is_active"]
-    search_fields = ["title", "slug", "description"]
-    ordering_fields = ["price", "created_at", "title"]
+    filterset_fields = ["category", "is_active", "is_featured"]
+    search_fields = ["title", "slug", "description", "variants__name", "variants__sku"]
+    ordering_fields = ["created_at", "title"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
         if self.request.user.is_staff:
             return queryset
-        return queryset.filter(is_active=True, category__is_active=True)
+        return queryset.filter(
+            is_active=True,
+            category__is_active=True,
+            variants__is_active=True,
+        ).distinct()
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

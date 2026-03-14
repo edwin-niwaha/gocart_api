@@ -6,7 +6,7 @@ from .base import *
 DEBUG = True
 ENVIRONMENT = "development"
 
-ALLOWED_HOSTS = ALLOWED_HOSTS or ["127.0.0.1", "localhost", "[::1]"]
+ALLOWED_HOSTS = ALLOWED_HOSTS or ["127.0.0.1", "localhost", "192.168.43.13","[::1]"]
 
 # ------------------------------------------------------------------------------
 # DATABASE
@@ -23,6 +23,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS or [
     "http://127.0.0.1:3000",
     "http://localhost:3000",
+    "http://192.168.43.13:8000",
 ]
 
 # ------------------------------------------------------------------------------

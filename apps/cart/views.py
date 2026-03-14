@@ -33,8 +33,9 @@ class CartViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Cart.objects.select_related("user").prefetch_related(
             "items",
-            "items__product",
-            "items__product__category",
+            "items__variant",
+            "items__variant__product",
+            "items__variant__product__category",
         )
         if self.request.user.is_staff:
             return queryset
@@ -58,8 +59,9 @@ class CartItemViewSet(viewsets.ModelViewSet):
         queryset = CartItem.objects.select_related(
             "cart",
             "cart__user",
-            "product",
-            "product__category",
+            "variant",
+            "variant__product",
+            "variant__product__category",
         )
         if self.request.user.is_staff:
             return queryset
@@ -76,7 +78,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
 
         item = add_item_to_cart(
             user=request.user,
-            product=serializer.validated_data["product"],
+            variant=serializer.validated_data["variant"],
             quantity=serializer.validated_data["quantity"],
         )
 
