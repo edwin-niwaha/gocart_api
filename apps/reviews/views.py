@@ -23,9 +23,23 @@ class ReviewViewSet(viewsets.ModelViewSet):
     ordering_fields = ["created_at", "rating"]
 
     def get_queryset(self):
-        return Review.objects.select_related("user", "product").all()
+        queryset = Review.objects.select_related("user", "product").all()
+
+        mine = self.request.query_params.get("mine") # type: ignore
+        if mine in {"1", "true", "True"}:
+            if not self.request.user.is_authenticated:
+                return queryset.none()
+            queryset = queryset.filter(user=self.request.user)
+
+        return queryset
 
     def create(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "Authentication credentials were not provided."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -36,6 +50,7 @@ class ReviewViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
+
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
 

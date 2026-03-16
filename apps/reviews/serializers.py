@@ -9,7 +9,7 @@ User = get_user_model()
 
 class ReviewSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
-    user_id = serializers.PrimaryKeyRelatedField(read_only=True)
+    user_id = serializers.IntegerField(source="user_id", read_only=True)
     product_title = serializers.CharField(source="product.title", read_only=True)
     product_slug = serializers.CharField(source="product.slug", read_only=True)
 
@@ -42,7 +42,7 @@ class ReviewSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context.get("request")
-        product = attrs.get("product")
+        product = attrs.get("product") or getattr(self.instance, "product", None)
 
         if request and request.method == "POST":
             if Review.objects.filter(user=request.user, product=product).exists():

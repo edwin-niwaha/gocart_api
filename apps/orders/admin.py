@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib import admin
 
 from .models import Order, OrderItem
@@ -30,7 +32,7 @@ class OrderItemInline(admin.TabularInline):
     ]
 
     def line_total(self, obj):
-        return obj.line_total
+        return obj.line_total if obj else Decimal("0.00")
 
 
 @admin.register(Order)
@@ -82,4 +84,4 @@ class OrderItemAdmin(admin.ModelAdmin):
     ]
 
     def line_total(self, obj):
-        return obj.line_total
+        return obj.line_total if obj else Decimal("0.00")

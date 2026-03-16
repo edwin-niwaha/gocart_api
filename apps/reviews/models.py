@@ -4,8 +4,8 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
-from apps.products.models import Product
 from apps.common.models import TimeStampedModel
+from apps.products.models import Product
 
 
 class Review(TimeStampedModel):
@@ -37,6 +37,7 @@ class Review(TimeStampedModel):
         indexes = [
             models.Index(fields=["created_at"]),
             models.Index(fields=["rating"]),
+            models.Index(fields=["product", "created_at"]),
         ]
 
     def __str__(self) -> str:

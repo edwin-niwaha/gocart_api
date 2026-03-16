@@ -119,7 +119,9 @@ class OrderItem(TimeStampedModel):
 
     @property
     def line_total(self) -> Decimal:
-        return self.unit_price * self.quantity
+        unit_price = self.unit_price or Decimal("0.00")
+        quantity = self.quantity or 0
+        return unit_price * quantity
 
     def clean(self):
         if self.variant_id and self.product_id and self.variant.product_id != self.product_id: # type: ignore
