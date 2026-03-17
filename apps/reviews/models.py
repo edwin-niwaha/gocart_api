@@ -38,6 +38,7 @@ class Review(TimeStampedModel):
             models.Index(fields=["created_at"]),
             models.Index(fields=["rating"]),
             models.Index(fields=["product", "created_at"]),
+            models.Index(fields=["user", "product"]),
         ]
 
     def __str__(self) -> str:

@@ -36,7 +36,12 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at", "is_in_stock")
+        read_only_fields = (
+            "id",
+            "created_at",
+            "updated_at",
+            "is_in_stock",
+        )
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -49,6 +54,9 @@ class ProductSerializer(serializers.ModelSerializer):
     variants = ProductVariantSerializer(many=True)
     base_price = serializers.ReadOnlyField()
     is_in_stock = serializers.ReadOnlyField()
+
+    average_rating = serializers.SerializerMethodField()
+    total_reviews = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -66,6 +74,8 @@ class ProductSerializer(serializers.ModelSerializer):
             "category",
             "category_id",
             "variants",
+            "average_rating",
+            "total_reviews",
             "created_at",
             "updated_at",
         )
@@ -75,7 +85,21 @@ class ProductSerializer(serializers.ModelSerializer):
             "updated_at",
             "base_price",
             "is_in_stock",
+            "average_rating",
+            "total_reviews",
         )
+
+    def get_average_rating(self, obj):
+        rating = getattr(obj, "product_rating", None)
+        if not rating:
+            return "0.00"
+        return str(rating.average_rating)
+
+    def get_total_reviews(self, obj):
+        rating = getattr(obj, "product_rating", None)
+        if not rating:
+            return 0
+        return rating.total_reviews
 
     def validate_image_urls(self, value):
         if not isinstance(value, list):
@@ -96,13 +120,15 @@ class ProductSerializer(serializers.ModelSerializer):
             if not name:
                 raise serializers.ValidationError("Each variant must have a name.")
 
-            if name in seen_names:
+            normalized_name = name.strip().lower()
+            if normalized_name in seen_names:
                 raise serializers.ValidationError(f"Duplicate variant name: {name}")
-            seen_names.add(name)
+            seen_names.add(normalized_name)
 
             if sku:
-                if sku in seen_skus:
+                normalized_sku = sku.strip().lower()
+                if normalized_sku in seen_skus:
                     raise serializers.ValidationError(f"Duplicate variant sku: {sku}")
-                seen_skus.add(sku)
+                seen_skus.add(normalized_sku)
 
         return value

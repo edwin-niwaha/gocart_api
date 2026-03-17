@@ -15,7 +15,6 @@ class IsAdminOrReadOnly(permissions.BasePermission):
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all().order_by("name")
     serializer_class = CategorySerializer
     permission_classes = [IsAdminOrReadOnly]
     lookup_field = "slug"
@@ -23,6 +22,13 @@ class CategoryViewSet(viewsets.ModelViewSet):
     filterset_fields = ["is_active"]
     search_fields = ["name", "slug"]
     ordering_fields = ["name", "created_at"]
+    ordering = ["name"]
+
+    def get_queryset(self):
+        queryset = Category.objects.all().order_by("name")
+        if self.request.user and self.request.user.is_staff:
+            return queryset
+        return queryset.filter(is_active=True)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -48,24 +54,34 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.select_related("category").prefetch_related("variants").all().order_by("-created_at")
     serializer_class = ProductSerializer
     permission_classes = [IsAdminOrReadOnly]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["category", "is_active", "is_featured"]
     search_fields = ["title", "slug", "description", "variants__name", "variants__sku"]
-    ordering_fields = ["created_at", "title"]
+    ordering_fields = ["created_at", "title", "base_price"]
+    ordering = ["-created_at"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        if self.request.user.is_staff:
+        queryset = (
+            Product.objects.select_related("category", "product_rating")
+            .prefetch_related("variants")
+            .all()
+            .order_by("-created_at")
+        )
+
+        if self.request.user and self.request.user.is_staff:
             return queryset
-        return queryset.filter(
-            is_active=True,
-            category__is_active=True,
-            variants__is_active=True,
-        ).distinct()
+
+        return (
+            queryset.filter(
+                is_active=True,
+                category__is_active=True,
+                variants__is_active=True,
+            )
+            .distinct()
+        )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

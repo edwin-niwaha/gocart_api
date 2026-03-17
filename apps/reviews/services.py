@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 from django.db.models import Avg, Count
@@ -6,20 +6,24 @@ from django.db.models import Avg, Count
 from .models import ProductRating, Review
 
 
+def _to_decimal_rating(value) -> Decimal:
+    if value is None:
+        return Decimal("0.00")
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 @transaction.atomic
-def update_product_rating(product):
+def update_product_rating(product) -> ProductRating:
     aggregates = Review.objects.filter(product=product).aggregate(
         average=Avg("rating"),
         total=Count("id"),
     )
 
-    average = aggregates["average"] or 0
-    total = aggregates["total"] or 0
+    average = aggregates.get("average")
+    total = aggregates.get("total", 0) or 0
 
     rating_obj, _ = ProductRating.objects.get_or_create(product=product)
-    rating_obj.average_rating = (
-        Decimal(str(round(average, 2))) if total else Decimal("0.00")
-    )
+    rating_obj.average_rating = _to_decimal_rating(average) if total else Decimal("0.00")
     rating_obj.total_reviews = total
     rating_obj.save(update_fields=["average_rating", "total_reviews", "updated_at"])
 
