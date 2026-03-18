@@ -5,18 +5,24 @@ from .models import CustomerAddress
 
 @transaction.atomic
 def create_address(*, user, **validated_data) -> CustomerAddress:
-    if validated_data.get("is_default", False):
-        CustomerAddress.objects.filter(user=user).update(is_default=False)
+    is_default = validated_data.get("is_default", False)
 
-    return CustomerAddress.objects.create(user=user, **validated_data)
+    if is_default:
+        CustomerAddress.objects.filter(user=user, is_default=True).update(is_default=False)
+
+    elif not CustomerAddress.objects.filter(user=user).exists():
+        validated_data["is_default"] = True
+
+    address = CustomerAddress.objects.create(user=user, **validated_data)
+    return address
 
 
 @transaction.atomic
 def update_address(*, instance: CustomerAddress, **validated_data) -> CustomerAddress:
-    if validated_data.get("is_default", False):
-        CustomerAddress.objects.filter(user=instance.user).exclude(pk=instance.pk).update(
-            is_default=False
-        )
+    is_default = validated_data.get("is_default")
+
+    if is_default is True:
+        CustomerAddress.objects.filter(user=instance.user).exclude(pk=instance.pk).update(is_default=False)
 
     for attr, value in validated_data.items():
         setattr(instance, attr, value)
@@ -27,12 +33,16 @@ def update_address(*, instance: CustomerAddress, **validated_data) -> CustomerAd
 
 @transaction.atomic
 def delete_address(*, instance: CustomerAddress) -> None:
-    was_default = instance.is_default
     user = instance.user
+    was_default = instance.is_default
     instance.delete()
 
     if was_default:
-        next_address = CustomerAddress.objects.filter(user=user).order_by("-created_at").first()
+        next_address = (
+            CustomerAddress.objects.filter(user=user)
+            .order_by("-created_at")
+            .first()
+        )
         if next_address:
             next_address.is_default = True
             next_address.save(update_fields=["is_default", "updated_at"])

@@ -1,58 +1,64 @@
 from django.contrib import admin
+
 from .models import CustomerAddress
 
 
 @admin.register(CustomerAddress)
 class CustomerAddressAdmin(admin.ModelAdmin):
     list_display = (
+        "id",
         "user",
-        "label",
         "city",
-        "country",
+        "region",
         "phone_number",
         "is_default",
         "created_at",
+        "updated_at",
     )
     list_filter = (
+        "region",
         "is_default",
-        "country",
         "city",
         "created_at",
+        "updated_at",
     )
     search_fields = (
         "user__email",
-        "label",
+        "user__username",
+        "street_name",
         "city",
-        "country",
-        "postal_code",
         "phone_number",
+        "additional_telephone",
+    )
+    readonly_fields = (
+        "created_at",
+        "updated_at",
     )
     ordering = ("-is_default", "-created_at")
     autocomplete_fields = ("user",)
 
     fieldsets = (
-        ("User Information", {
-            "fields": ("user", "label")
+        ("User", {
+            "fields": ("user",)
         }),
         ("Address Details", {
             "fields": (
-                "address_line1",
-                "address_line2",
+                "street_name",
                 "city",
-                "state",
-                "postal_code",
-                "country",
+                "region",
+                "additional_information",
             )
         }),
-        ("Contact", {
-            "fields": ("phone_number",)
+        ("Contact Details", {
+            "fields": (
+                "phone_number",
+                "additional_telephone",
+            )
         }),
         ("Settings", {
             "fields": ("is_default",)
         }),
         ("Timestamps", {
-            "fields": ("created_at", "updated_at"),
+            "fields": ("created_at", "updated_at")
         }),
     )
-
-    readonly_fields = ("created_at", "updated_at")

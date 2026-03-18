@@ -8,14 +8,12 @@ class CustomerAddressSerializer(serializers.ModelSerializer):
         model = CustomerAddress
         fields = (
             "id",
-            "label",
-            "address_line1",
-            "address_line2",
+            "street_name",
             "city",
-            "state",
-            "postal_code",
-            "country",
             "phone_number",
+            "additional_telephone",
+            "additional_information",
+            "region",
             "is_default",
             "created_at",
             "updated_at",
@@ -26,10 +24,25 @@ class CustomerAddressSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    def validate_street_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Street name cannot be empty.")
+        return value
+
+    def validate_city(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("City cannot be empty.")
+        return value
+
     def validate(self, attrs):
-        postal_code = attrs.get("postal_code")
-        if postal_code and not postal_code.strip():
+        phone_number = attrs.get("phone_number")
+        additional_telephone = attrs.get("additional_telephone")
+
+        if phone_number and additional_telephone and phone_number == additional_telephone:
             raise serializers.ValidationError(
-                {"postal_code": "Postal code cannot be empty."}
+                {"additional_telephone": "Additional telephone must be different from phone number."}
             )
+
         return attrs

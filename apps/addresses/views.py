@@ -18,18 +18,25 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAddressOwner]
 
     def get_queryset(self):
-        queryset = CustomerAddress.objects.all().order_by("-is_default", "-created_at")
+        queryset = CustomerAddress.objects.select_related("user").order_by("-is_default", "-created_at")
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        return create_address(user=self.request.user, **serializer.validated_data)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        address = create_address(user=request.user, **serializer.validated_data)
+        address = self.perform_create(serializer)
         output = self.get_serializer(address)
-        return Response(output.data, status=status.HTTP_201_CREATED)
+        headers = self.get_success_headers(output.data)
+        return Response(output.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_update(self, serializer):
+        return update_address(instance=self.get_object(), **serializer.validated_data)
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
@@ -37,7 +44,7 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
 
-        address = update_address(instance=instance, **serializer.validated_data)
+        address = self.perform_update(serializer)
         output = self.get_serializer(address)
         return Response(output.data, status=status.HTTP_200_OK)
 
