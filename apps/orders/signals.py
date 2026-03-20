@@ -14,14 +14,14 @@ def capture_old_order_status(sender, instance: Order, **kwargs):
     can compare old vs new safely.
     """
     if not instance.pk:
-        instance._old_status = None
+        instance._old_status = None # type: ignore
         return
 
     try:
         previous = Order.objects.only("status").get(pk=instance.pk)
-        instance._old_status = previous.status
+        instance._old_status = previous.status # type: ignore
     except Order.DoesNotExist:
-        instance._old_status = None
+        instance._old_status = None # type: ignore
 
 
 @receiver(post_save, sender=Order)
@@ -46,12 +46,31 @@ def send_order_status_notifications_on_change(
         return
 
     # existing email queue
-    queue_order_status_notifications(instance.id, old_status, new_status)
+    queue_order_status_notifications(instance.id, old_status, new_status) # type: ignore
 
     # ✅ ADD THIS (in-app notification)
     send_order_notification(
         user=instance.user,
         order=instance,
         title="Order status updated",
-        message=f"Your order {instance.slug} is now {instance.get_status_display()}",
+        message=f"Your order {instance.slug} is now {instance.get_status_display()}", # type: ignore
     )
+
+
+@receiver(post_save, sender=Order)
+def handle_stock_on_status_change(sender, instance: Order, created: bool, **kwargs):
+    if created:
+        return
+
+    old_status = getattr(instance, "_old_status", None)
+    new_status = instance.status
+
+    if not old_status or old_status == new_status:
+        return
+
+    # ✅ restore stock when cancelled
+    if new_status == Order.Status.CANCELLED:
+        for item in instance.items.select_related("variant"): # type: ignore
+            variant = item.variant
+            variant.stock_quantity += item.quantity
+            variant.save(update_fields=["stock_quantity"])

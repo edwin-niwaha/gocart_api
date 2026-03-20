@@ -53,7 +53,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             "items__product",
             "items__variant",
         )
-        if self.request.user.is_staff:
+        if self.request.user.is_staff: # type: ignore
             return queryset
         return queryset.filter(user=self.request.user)
 
@@ -97,11 +97,37 @@ class OrderViewSet(viewsets.ModelViewSet):
                 description=description or "Placed from mobile app",
             )
 
+            # for cart_item in cart_items:
+            #     add_order_item(
+            #         order=order,
+            #         variant=cart_item.variant,
+            #         quantity=cart_item.quantity,
+            #     )
+
             for cart_item in cart_items:
+                variant = (
+                    cart_item.variant.__class__.objects
+                    .select_for_update()
+                    .get(id=cart_item.variant.id)
+                )
+
+                quantity = cart_item.quantity
+
+                # 🚨 CRITICAL: check stock again (race condition protection)
+                if variant.stock_quantity < quantity:
+                    raise Exception(
+                        f"Insufficient stock for {variant.product.title} ({variant.name})"
+                    )
+
+                # ✅ reduce stock
+                variant.stock_quantity -= quantity
+                variant.save(update_fields=["stock_quantity"])
+
+                # create order item
                 add_order_item(
                     order=order,
-                    variant=cart_item.variant,
-                    quantity=cart_item.quantity,
+                    variant=variant,
+                    quantity=quantity,
                 )
 
             order.recalculate_total_price()
@@ -135,7 +161,7 @@ class OrderItemViewSet(viewsets.ModelViewSet):
             "variant",
             "order__user",
         )
-        if self.request.user.is_staff:
+        if self.request.user.is_staff: # type: ignore
             return queryset
         return queryset.filter(order__user=self.request.user)
 

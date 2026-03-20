@@ -8,7 +8,6 @@ from apps.reviews import views as review_views
 from apps.users import views as user_views
 from apps.wishlist import views as wishlist_views
 from apps.payments import views as payment_views
-from apps.inventory import views as inventory_views
 from apps.shipping import views as shipping_views
 from apps.promotions import views as promotions_views
 from apps.notifications import views as notification_views
@@ -29,8 +28,6 @@ router.register("wishlist", wishlist_views.WishlistViewSet, basename="wishlist")
 router.register("wishlist-items", wishlist_views.WishlistItemViewSet, basename="wishlist-items")
 router.register("addresses", address_views.CustomerAddressViewSet, basename="addresses")
 router.register("payments", payment_views.PaymentViewSet, basename="payments")
-router.register("inventory", inventory_views.InventoryViewSet, basename="inventory")
-router.register("inventory-movements", inventory_views.InventoryMovementViewSet, basename="inventory-movements")
 router.register("shipping-methods", shipping_views.ShippingMethodViewSet, basename="shipping-methods")
 router.register("shipments", shipping_views.ShipmentViewSet, basename="shipments")
 router.register("coupons", promotions_views.CouponViewSet, basename="coupons")
