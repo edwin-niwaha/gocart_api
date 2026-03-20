@@ -1,0 +1,15 @@
+A new order has been placed on {{ shop_name }}.
+
+Order Number: {{ order.slug }}
+Customer: {{ user.email }}
+Status: {{ order.get_status_display }}
+Total: {{ order.total_price }}
+
+Delivery Address:
+{{ order.address.street_name }}
+{{ order.address.city }}
+
+Items:
+{% for item in items %}
+- {{ item.product_title }}{% if item.variant_name %} ({{ item.variant_name }}){% endif %} x {{ item.quantity }} = {{ item.line_total }}
+{% endfor %}

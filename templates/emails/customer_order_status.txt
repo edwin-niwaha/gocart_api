@@ -1,0 +1,8 @@
+Hello {{ display_name }},
+
+Your order {{ order.slug }} is now {{ status_label }}.
+
+Total: {{ order.total_price }}
+
+Thank you for shopping with {{ shop_name }}.
+Support: {{ support_email }}

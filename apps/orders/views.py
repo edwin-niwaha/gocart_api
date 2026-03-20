@@ -1,15 +1,26 @@
+from __future__ import annotations
+
+import logging
+
+from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.cart.models import CartItem
 from .models import Order, OrderItem
+from .notifications import queue_order_created_notifications
 from .serializers import (
+    OrderCheckoutSerializer,
     OrderItemReadSerializer,
     OrderItemWriteSerializer,
     OrderReadSerializer,
     OrderWriteSerializer,
 )
 from .services import add_order_item, create_order, remove_order_item, update_order_item
+
+logger = logging.getLogger(__name__)
 
 
 class IsAdminOrOwner(permissions.BasePermission):
@@ -37,7 +48,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     ordering_fields = ["created_at", "total_price", "status"]
 
     def get_queryset(self):
-        queryset = Order.objects.select_related("user").prefetch_related(
+        queryset = Order.objects.select_related("user", "address").prefetch_related(
             "items",
             "items__product",
             "items__variant",
@@ -47,17 +58,68 @@ class OrderViewSet(viewsets.ModelViewSet):
         return queryset.filter(user=self.request.user)
 
     def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
+        if self.action == "checkout":
+            return OrderCheckoutSerializer
+        if self.action in {"create", "update", "partial_update"}:
             return OrderWriteSerializer
         return OrderReadSerializer
 
-    def create(self, request, *args, **kwargs):
+    @action(detail=False, methods=["post"], url_path="checkout")
+    def checkout(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        order = create_order(user=request.user, **serializer.validated_data)
+        address = serializer.validated_data["address"]
+        description = serializer.validated_data.get("description", "")
+
+        cart_items = list(
+            CartItem.objects.select_related("cart", "variant", "variant__product").filter(
+                cart__user=request.user
+            )
+        )
+
+        if not cart_items:
+            return Response(
+                {"detail": "Your cart is empty."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        logger.info(
+            "Checkout started for user_id=%s cart_items=%s",
+            request.user.id,
+            len(cart_items),
+        )
+
+        with transaction.atomic():
+            order = create_order(
+                user=request.user,
+                address=address,
+                description=description or "Placed from mobile app",
+            )
+
+            for cart_item in cart_items:
+                add_order_item(
+                    order=order,
+                    variant=cart_item.variant,
+                    quantity=cart_item.quantity,
+                )
+
+            order.recalculate_total_price()
+
+            CartItem.objects.filter(id__in=[item.id for item in cart_items]).delete()
+
+            queue_order_created_notifications(order.id)
+
+        logger.info("Checkout completed for order_id=%s user_id=%s", order.id, request.user.id)
+
         output = OrderReadSerializer(order, context=self.get_serializer_context())
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Use the checkout endpoint."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
 
 class OrderItemViewSet(viewsets.ModelViewSet):
@@ -78,7 +140,7 @@ class OrderItemViewSet(viewsets.ModelViewSet):
         return queryset.filter(order__user=self.request.user)
 
     def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
+        if self.action in {"create", "update", "partial_update"}:
             return OrderItemWriteSerializer
         return OrderItemReadSerializer
 
@@ -91,6 +153,8 @@ class OrderItemViewSet(viewsets.ModelViewSet):
             variant=serializer.validated_data["variant"],
             quantity=serializer.validated_data["quantity"],
         )
+        item.order.recalculate_total_price()
+
         output = OrderItemReadSerializer(item, context=self.get_serializer_context())
         return Response(output.data, status=status.HTTP_201_CREATED)
 

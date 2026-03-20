@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f7fb;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;">
+            <tr>
+              <td style="background:linear-gradient(135deg,#111827,#1d4ed8);padding:28px 32px;color:#ffffff;">
+                <div style="font-size:24px;font-weight:800;">{{ shop_name }}</div>
+                <div style="margin-top:8px;font-size:14px;opacity:0.92;">Order status changed</div>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:32px;">
+                <h2 style="margin:0 0 12px;font-size:24px;color:#111827;">Order status update</h2>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+                  <tr>
+                    <td style="padding:18px;">
+                      <div style="padding:4px 0;font-size:14px;"><strong>Order Number:</strong> {{ order.slug }}</div>
+                      <div style="padding:4px 0;font-size:14px;"><strong>Status:</strong> <span style="color:#2563eb;font-weight:700;">{{ status_label }}</span></div>
+                      <div style="padding:4px 0;font-size:14px;"><strong>Customer:</strong> {{ user.email }}</div>
+                      <div style="padding:4px 0;font-size:14px;"><strong>Total:</strong> {{ order.total_price }}</div>
+                    </td>
+                  </tr>
+                </table>
+
+                <h3 style="margin:0 0 12px;font-size:18px;color:#111827;">Items</h3>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                  <tr>
+                    <td style="padding:12px 10px;background:#eff6ff;border-bottom:1px solid #dbeafe;font-size:13px;font-weight:700;">Item</td>
+                    <td style="padding:12px 10px;background:#eff6ff;border-bottom:1px solid #dbeafe;font-size:13px;font-weight:700;" align="center">Qty</td>
+                    <td style="padding:12px 10px;background:#eff6ff;border-bottom:1px solid #dbeafe;font-size:13px;font-weight:700;" align="right">Amount</td>
+                  </tr>
+                  {% for item in items %}
+                  <tr>
+                    <td style="padding:14px 10px;border-bottom:1px solid #e5e7eb;font-size:14px;">{{ item.product_title }}{% if item.variant_name %} <span style="color:#6b7280;">({{ item.variant_name }})</span>{% endif %}</td>
+                    <td style="padding:14px 10px;border-bottom:1px solid #e5e7eb;font-size:14px;" align="center">{{ item.quantity }}</td>
+                    <td style="padding:14px 10px;border-bottom:1px solid #e5e7eb;font-size:14px;" align="right">{{ item.line_total }}</td>
+                  </tr>
+                  {% endfor %}
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:22px 32px;background:#111827;color:#d1d5db;font-size:12px;">
+                {{ shop_name }} admin notification
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

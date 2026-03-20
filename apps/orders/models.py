@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
+from apps.addresses.models import CustomerAddress
 from apps.common.models import TimeStampedModel
 from apps.products.models import Product, ProductVariant
 
@@ -20,6 +24,11 @@ class Order(TimeStampedModel):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="orders",
+    )
+    address = models.ForeignKey(
+        CustomerAddress,
+        on_delete=models.PROTECT,
         related_name="orders",
     )
     slug = models.SlugField(max_length=255, unique=True, db_index=True)
@@ -52,17 +61,14 @@ class Order(TimeStampedModel):
         return self.slug
 
     def recalculate_total_price(self) -> Decimal:
-        total = sum(
-            (item.line_total for item in self.items.all()),  # type: ignore[attr-defined]
-            Decimal("0.00"),
-        )
+        total = sum((item.line_total for item in self.items.all()), Decimal("0.00"))
         self.total_price = total
         self.save(update_fields=["total_price", "updated_at"])
         return total
 
     @property
     def total_items(self) -> int:
-        return sum(item.quantity for item in self.items.all())  # type: ignore[attr-defined]
+        return sum(item.quantity for item in self.items.all())
 
 
 class OrderItem(TimeStampedModel):
@@ -82,7 +88,6 @@ class OrderItem(TimeStampedModel):
         related_name="order_items",
     )
 
-    # snapshot fields for historical accuracy
     product_title = models.CharField(max_length=255, editable=False)
     variant_name = models.CharField(max_length=100, editable=False)
     variant_sku = models.CharField(max_length=100, editable=False)
@@ -123,23 +128,22 @@ class OrderItem(TimeStampedModel):
         quantity = self.quantity or 0
         return unit_price * quantity
 
-    def clean(self):
-        if self.variant_id and self.product_id and self.variant.product_id != self.product_id: # type: ignore
-            from django.core.exceptions import ValidationError
+    def clean(self) -> None:
+        if self.variant_id and self.product_id and self.variant.product_id != self.product_id:
+            raise ValidationError(
+                {"variant": "Selected variant does not belong to the selected product."}
+            )
 
-            raise ValidationError({
-                "variant": "Selected variant does not belong to the selected product."
-            })
-
-    def save(self, *args, **kwargs): # type: ignore
-        if self.variant_id: # type: ignore
-            self.product = self.variant.product
-            self.product_title = self.variant.product.title
-            self.variant_name = self.variant.name
-            self.variant_sku = self.variant.sku
+    def save(self, *args, **kwargs):
+        if self.variant_id:
+            variant = self.variant
+            self.product = variant.product
+            self.product_title = variant.product.title
+            self.variant_name = variant.name
+            self.variant_sku = variant.sku
 
             if self.unit_price is None:
-                self.unit_price = self.variant.price
+                self.unit_price = variant.price
 
         self.full_clean()
         super().save(*args, **kwargs)

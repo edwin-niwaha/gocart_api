@@ -29,7 +29,7 @@ CSRF_TRUSTED_ORIGINS = CSRF_TRUSTED_ORIGINS or [
 # ------------------------------------------------------------------------------
 # DEVELOPMENT HELPERS
 # ------------------------------------------------------------------------------
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # Optional relaxed settings for local development
 SECURE_SSL_REDIRECT = False

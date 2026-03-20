@@ -1,0 +1,9 @@
+Order {{ order.slug }} changed status to {{ status_label }}.
+
+Customer: {{ user.email }}
+Total: {{ order.total_price }}
+
+Items:
+{% for item in items %}
+- {{ item.product_title }}{% if item.variant_name %} ({{ item.variant_name }}){% endif %} x {{ item.quantity }} = {{ item.line_total }}
+{% endfor %}

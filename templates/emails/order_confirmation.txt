@@ -1,0 +1,25 @@
+Hello {{ display_name }},
+
+Thank you for shopping with {{ shop_name }}.
+
+Your order has been received successfully.
+
+Order Number: {{ order.slug }}
+Status: {{ order.get_status_display }}
+Total: {{ order.total_price }}
+
+Delivery Address:
+{{ order.address.street_name }}
+{{ order.address.city }}
+
+Items:
+{% for item in items %}
+- {{ item.product_title }}{% if item.variant_name %} ({{ item.variant_name }}){% endif %} x {{ item.quantity }} = {{ item.line_total }}
+{% endfor %}
+
+We will notify you when your order status changes.
+
+Support: {{ support_email }}
+
+Best regards,
+{{ shop_name }}

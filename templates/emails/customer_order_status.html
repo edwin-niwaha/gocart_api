@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background-color:#f5f7fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f7fb;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;">
+            <tr>
+              <td style="background:linear-gradient(135deg,#0f172a,#2563eb);padding:28px 32px;color:#ffffff;">
+                <div style="font-size:24px;font-weight:800;">{{ shop_name }}</div>
+                <div style="margin-top:8px;font-size:14px;opacity:0.92;">Order status update</div>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:32px;">
+                <h2 style="margin:0 0 12px;font-size:24px;color:#111827;">Your order has been updated</h2>
+                <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">
+                  Hello <strong>{{ display_name }}</strong>,
+                </p>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 24px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+                  <tr>
+                    <td style="padding:18px;">
+                      <div style="padding:4px 0;font-size:14px;"><strong>Order Number:</strong> {{ order.slug }}</div>
+                      <div style="padding:4px 0;font-size:14px;"><strong>New Status:</strong> <span style="color:#2563eb;font-weight:700;">{{ status_label }}</span></div>
+                      <div style="padding:4px 0;font-size:14px;"><strong>Total:</strong> {{ order.total_price }}</div>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:0;font-size:14px;line-height:1.7;color:#4b5563;">
+                  Thank you for shopping with {{ shop_name }}.
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:22px 32px;background:#111827;color:#d1d5db;font-size:12px;">
+                Need help? Contact {{ support_email }}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from uuid import uuid4
+
 from django.db import transaction
 from django.utils.text import slugify
 
@@ -7,9 +11,7 @@ from .models import Order, OrderItem
 
 
 def generate_order_slug(*, user, prefix: str = "order") -> str:
-    base = slugify(f"{prefix}-{user.id}")
-    last_order = Order.objects.filter(user=user).count() + 1
-    return f"{base}-{last_order}"
+    return f"{slugify(prefix)}-{user.id}-{uuid4().hex[:8]}"
 
 
 @transaction.atomic
@@ -17,21 +19,18 @@ def create_order(*, user, **validated_data) -> Order:
     if not validated_data.get("slug"):
         validated_data["slug"] = generate_order_slug(user=user)
 
-    order = Order.objects.create(user=user, **validated_data)
-    return order
+    return Order.objects.create(user=user, **validated_data)
 
 
 @transaction.atomic
 def add_order_item(*, order: Order, variant: ProductVariant, quantity: int) -> OrderItem:
-    item = OrderItem.objects.create(
+    return OrderItem.objects.create(
         order=order,
         product=variant.product,
         variant=variant,
         quantity=quantity,
         unit_price=variant.price,
     )
-    order.recalculate_total_price()
-    return item
 
 
 @transaction.atomic
