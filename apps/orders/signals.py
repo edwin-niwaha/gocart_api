@@ -5,7 +5,7 @@ from django.dispatch import receiver
 
 from .models import Order
 from .notifications import queue_order_status_notifications
-
+from apps.notifications.services import send_order_notification
 
 @receiver(pre_save, sender=Order)
 def capture_old_order_status(sender, instance: Order, **kwargs):
@@ -45,4 +45,13 @@ def send_order_status_notifications_on_change(
     if not old_status or old_status == new_status:
         return
 
+    # existing email queue
     queue_order_status_notifications(instance.id, old_status, new_status)
+
+    # ✅ ADD THIS (in-app notification)
+    send_order_notification(
+        user=instance.user,
+        order=instance,
+        title="Order status updated",
+        message=f"Your order {instance.slug} is now {instance.get_status_display()}",
+    )
