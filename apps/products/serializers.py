@@ -19,6 +19,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class ProductVariantSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
     is_in_stock = serializers.ReadOnlyField()
 
     class Meta:
@@ -37,7 +38,6 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = (
-            "id",
             "created_at",
             "updated_at",
             "is_in_stock",
@@ -114,19 +114,19 @@ class ProductSerializer(serializers.ModelSerializer):
         seen_skus = set()
 
         for item in value:
-            name = item.get("name")
-            sku = item.get("sku")
+            name = (item.get("name") or "").strip()
+            sku = (item.get("sku") or "").strip()
 
             if not name:
                 raise serializers.ValidationError("Each variant must have a name.")
 
-            normalized_name = name.strip().lower()
+            normalized_name = name.lower()
             if normalized_name in seen_names:
                 raise serializers.ValidationError(f"Duplicate variant name: {name}")
             seen_names.add(normalized_name)
 
             if sku:
-                normalized_sku = sku.strip().lower()
+                normalized_sku = sku.lower()
                 if normalized_sku in seen_skus:
                     raise serializers.ValidationError(f"Duplicate variant sku: {sku}")
                 seen_skus.add(normalized_sku)

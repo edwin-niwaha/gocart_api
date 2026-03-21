@@ -50,8 +50,8 @@ def generate_unique_sku(
 def _build_variant_defaults(product: Product, item: dict) -> dict:
     return {
         "product": product,
-        "name": item["name"],
-        "sku": item.get("sku") or generate_unique_sku(product.title, item["name"]),
+        "name": item["name"].strip(),
+        "sku": (item.get("sku") or "").strip() or generate_unique_sku(product.title, item["name"]),
         "price": item["price"],
         "stock_quantity": item.get("stock_quantity", 0),
         "max_quantity_per_order": item.get("max_quantity_per_order"),
@@ -63,16 +63,25 @@ def _build_variant_defaults(product: Product, item: dict) -> dict:
 @transaction.atomic
 def create_category(**validated_data) -> Category:
     name = validated_data.get("name", "").strip()
-    slug = (validated_data.get("slug") or "").strip()
+    validated_data["name"] = name
 
+    slug = (validated_data.get("slug") or "").strip()
     if not slug:
         validated_data["slug"] = generate_unique_slug(Category, name)
+    else:
+        validated_data["slug"] = slug
 
     return Category.objects.create(**validated_data)
 
 
 @transaction.atomic
 def update_category(*, instance: Category, **validated_data) -> Category:
+    if "name" in validated_data and validated_data["name"]:
+        validated_data["name"] = validated_data["name"].strip()
+
+    if "slug" in validated_data and validated_data["slug"]:
+        validated_data["slug"] = validated_data["slug"].strip()
+
     for attr, value in validated_data.items():
         setattr(instance, attr, value)
 
@@ -92,10 +101,16 @@ def create_product(**validated_data) -> Product:
     variants_data = validated_data.pop("variants", [])
 
     title = validated_data.get("title", "").strip()
-    slug = (validated_data.get("slug") or "").strip()
+    validated_data["title"] = title
 
+    if "description" in validated_data and validated_data["description"] is not None:
+        validated_data["description"] = validated_data["description"].strip()
+
+    slug = (validated_data.get("slug") or "").strip()
     if not slug:
         validated_data["slug"] = generate_unique_slug(Product, title)
+    else:
+        validated_data["slug"] = slug
 
     product = Product.objects.create(**validated_data)
 
@@ -108,6 +123,15 @@ def create_product(**validated_data) -> Product:
 @transaction.atomic
 def update_product(*, instance: Product, **validated_data) -> Product:
     variants_data = validated_data.pop("variants", None)
+
+    if "title" in validated_data and validated_data["title"]:
+        validated_data["title"] = validated_data["title"].strip()
+
+    if "description" in validated_data and validated_data["description"] is not None:
+        validated_data["description"] = validated_data["description"].strip()
+
+    if "slug" in validated_data and validated_data["slug"]:
+        validated_data["slug"] = validated_data["slug"].strip()
 
     for attr, value in validated_data.items():
         setattr(instance, attr, value)
@@ -130,13 +154,15 @@ def update_product(*, instance: Product, **validated_data) -> Product:
 
         for item in variants_data:
             variant_id = item.get("id")
+            variant_name = item["name"].strip()
+            variant_sku = (item.get("sku") or "").strip()
 
             if variant_id and variant_id in existing_variants:
                 variant = existing_variants[variant_id]
-                variant.name = item["name"]
-                variant.sku = item.get("sku") or generate_unique_sku(
+                variant.name = variant_name
+                variant.sku = variant_sku or generate_unique_sku(
                     instance.title,
-                    item["name"],
+                    variant_name,
                     exclude_id=variant.id,
                 )
                 variant.price = item["price"]
@@ -149,8 +175,8 @@ def update_product(*, instance: Product, **validated_data) -> Product:
             else:
                 variant = ProductVariant.objects.create(
                     product=instance,
-                    name=item["name"],
-                    sku=item.get("sku") or generate_unique_sku(instance.title, item["name"]),
+                    name=variant_name,
+                    sku=variant_sku or generate_unique_sku(instance.title, variant_name),
                     price=item["price"],
                     stock_quantity=item.get("stock_quantity", 0),
                     max_quantity_per_order=item.get("max_quantity_per_order"),
@@ -159,6 +185,6 @@ def update_product(*, instance: Product, **validated_data) -> Product:
                 )
                 kept_variant_ids.append(variant.id)
 
-        instance.variants.exclude(id__in=kept_variant_ids).delete()
+        instance.variants.exclude(id__in=kept_variant_ids).delete() # type: ignore
 
     return instance

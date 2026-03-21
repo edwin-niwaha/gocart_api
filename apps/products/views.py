@@ -1,8 +1,9 @@
+from django.db.models import Prefetch
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.response import Response
 
-from .models import Category, Product
+from .models import Category, Product, ProductVariant
 from .serializers import CategorySerializer, ProductSerializer
 from .services import create_category, create_product, update_category, update_product
 
@@ -26,8 +27,10 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Category.objects.all().order_by("name")
-        if self.request.user and self.request.user.is_staff:
+
+        if self.request.user and self.request.user.is_staff: # type: ignore
             return queryset
+
         return queryset.filter(is_active=True)
 
     def create(self, request, *args, **kwargs):
@@ -59,23 +62,39 @@ class ProductViewSet(viewsets.ModelViewSet):
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["category", "is_active", "is_featured"]
-    search_fields = ["title", "slug", "description", "variants__name", "variants__sku"]
-    ordering_fields = ["created_at", "title", "base_price"]
+    search_fields = [
+        "title",
+        "slug",
+        "description",
+        "category__name",
+        "category__slug",
+        "variants__name",
+        "variants__sku",
+    ]
+    ordering_fields = ["created_at", "title"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
-        queryset = (
-            Product.objects.select_related("category", "product_rating")
-            .prefetch_related("variants")
-            .all()
-            .order_by("-created_at")
+        base_queryset = Product.objects.select_related(
+            "category",
+            "product_rating",
+        ).order_by("-created_at")
+
+        if self.request.user and self.request.user.is_staff: # type: ignore
+            return base_queryset.prefetch_related("variants")
+
+        active_variants = Prefetch(
+            "variants",
+            queryset=ProductVariant.objects.filter(is_active=True).order_by(
+                "sort_order",
+                "price",
+                "id",
+            ),
         )
 
-        if self.request.user and self.request.user.is_staff:
-            return queryset
-
         return (
-            queryset.filter(
+            base_queryset.prefetch_related(active_variants)
+            .filter(
                 is_active=True,
                 category__is_active=True,
                 variants__is_active=True,
