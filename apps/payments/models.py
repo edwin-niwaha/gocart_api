@@ -9,7 +9,6 @@ from apps.common.models import TimeStampedModel
 from apps.orders.models import Order
 
 
-
 class Payment(TimeStampedModel):
     class Provider(models.TextChoices):
         CASH = "CASH", "Cash"
@@ -29,7 +28,7 @@ class Payment(TimeStampedModel):
 
     class Currency(models.TextChoices):
         UGX = "UGX", "Ugandan Shilling"
-        USD = "USD", "US Dollar"
+        EUR = "EUR", "Euro"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -40,6 +39,8 @@ class Payment(TimeStampedModel):
         Order,
         on_delete=models.CASCADE,
         related_name="payments",
+        null=True,
+        blank=True,
     )
     provider = models.CharField(max_length=20, choices=Provider.choices)
     status = models.CharField(
@@ -58,6 +59,8 @@ class Payment(TimeStampedModel):
         decimal_places=2,
         validators=[MinValueValidator(Decimal("0.00"))],
     )
+    phone_number = models.CharField(max_length=20, blank=True)
+    external_id = models.CharField(max_length=100, blank=True)
     reference = models.CharField(max_length=100, unique=True, db_index=True, editable=False)
     transaction_id = models.CharField(max_length=150, blank=True)
     checkout_url = models.URLField(blank=True)

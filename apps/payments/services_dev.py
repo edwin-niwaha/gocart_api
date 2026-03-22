@@ -5,9 +5,6 @@ from decimal import Decimal
 import requests
 from django.conf import settings
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
-import logging
-logger = logging.getLogger(__name__)
 
 from apps.cart.models import CartItem
 from .models import Payment
@@ -61,7 +58,7 @@ def request_to_pay(*, phone: str, amount: Decimal, external_id: str | None = Non
 
     body = {
         "amount": str(int(amount)),
-        "currency": settings.MOMO_CURRENCY,
+        "currency": "EUR",  # Update to UGX in prod and EUR
         "externalId": numeric_external_id,
         "payer": {
             "partyIdType": "MSISDN",
@@ -78,13 +75,6 @@ def request_to_pay(*, phone: str, amount: Decimal, external_id: str | None = Non
         data = res.json() if res.content else {}
     except Exception:
         data = {"raw": res.text}
-
-    logger.warning(
-        "MTN request_to_pay status=%s reference_id=%s response=%s",
-        res.status_code,
-        transaction_id,
-        data,
-    )
 
     return {
         "reference_id": transaction_id,
@@ -116,7 +106,7 @@ def initiate_mtn_payment(*, user, phone_number: str, address) -> Payment:
         order=None,
         provider=Payment.Provider.MTN,
         amount=amount,
-        currency=settings.MOMO_CURRENCY,
+        currency=Payment.Currency.EUR,
         phone_number=phone_number,
         status=Payment.Status.PENDING,
         provider_response={
@@ -139,20 +129,11 @@ def initiate_mtn_payment(*, user, phone_number: str, address) -> Payment:
         "address_id": address.id,
     }
 
-    if result["status_code"] == 202:
+    if result["status_code"] in (200, 201, 202):
         payment.status = Payment.Status.PROCESSING
-        payment.save(
-            update_fields=[
-                "external_id",
-                "transaction_id",
-                "provider_response",
-                "status",
-                "updated_at",
-            ]
-        )
-        return payment
+    else:
+        payment.status = Payment.Status.FAILED
 
-    payment.status = Payment.Status.FAILED
     payment.save(
         update_fields=[
             "external_id",
@@ -163,76 +144,36 @@ def initiate_mtn_payment(*, user, phone_number: str, address) -> Payment:
         ]
     )
 
-    raise ValidationError({
-        "detail": "MTN payment request was not accepted.",
-        "provider_response": result["data"],
-        "provider_status_code": result["status_code"],
-    })
+    return payment
 
 
 def check_status(reference_id: str) -> dict:
     access_token = create_access_token()
     url = f"{settings.MOMO_BASE_URL}/collection/v1_0/requesttopay/{reference_id}"
-    headers = momo_headers(settings.SUBSCRIPTION_KEY, token=access_token)
+    headers = momo_headers(settings.SUBSCRIPTION_KEY, access_token)
 
     res = requests.get(url, headers=headers, timeout=30)
 
-    try:
-        data = res.json() if res.content else {}
-    except Exception:
-        data = {"raw": res.text}
+    if res.status_code == 404:
+        return {
+            "status": "NOT_FOUND",
+            "message": "Transaction not found",
+        }
 
-    logger.warning(
-        "MTN check_status http_status=%s reference_id=%s response=%s",
-        res.status_code,
-        reference_id,
-        data,
-    )
+    if res.status_code >= 400:
+        return {
+            "status": "ERROR",
+            "message": res.text,
+        }
 
-    return {
-        "http_status": res.status_code,
-        "data": data,
-    }
+    return res.json()
 
 
 def refresh_mtn_payment_status(payment: Payment) -> Payment:
     if payment.provider != Payment.Provider.MTN or not payment.external_id:
         return payment
 
-    result = check_status(payment.external_id)
-    http_status = result.get("http_status")
-    data = result.get("data", {})
-
-    if http_status == 404:
-        payment.status = Payment.Status.FAILED
-        payment.provider_response = {
-            **payment.provider_response,
-            "status_check": data,
-            "status_check_http_status": http_status,
-        }
-        payment.save(
-            update_fields=[
-                "status",
-                "provider_response",
-                "updated_at",
-            ]
-        )
-        return payment
-
-    if http_status >= 400: # type: ignore
-        payment.provider_response = {
-            **payment.provider_response,
-            "status_check": data,
-            "status_check_http_status": http_status,
-        }
-        payment.save(
-            update_fields=[
-                "provider_response",
-                "updated_at",
-            ]
-        )
-        return payment
-
+    data = check_status(payment.external_id)
     provider_status = str(data.get("status", "")).upper()
 
     financial_transaction_id = data.get("financialTransactionId")
@@ -243,15 +184,16 @@ def refresh_mtn_payment_status(payment: Payment) -> Payment:
         payment.status = Payment.Status.PAID
         if not payment.paid_at:
             payment.paid_at = timezone.now()
-    elif provider_status in {"FAILED", "REJECTED", "EXPIRED"}:
+
+    elif provider_status == "FAILED":
         payment.status = Payment.Status.FAILED
+
     else:
         payment.status = Payment.Status.PROCESSING
 
     payment.provider_response = {
         **payment.provider_response,
         "status_check": data,
-        "status_check_http_status": http_status,
     }
     payment.save(
         update_fields=[

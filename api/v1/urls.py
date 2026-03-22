@@ -27,7 +27,6 @@ router.register("ratings", review_views.ProductRatingViewSet, basename="ratings"
 router.register("wishlist", wishlist_views.WishlistViewSet, basename="wishlist")
 router.register("wishlist-items", wishlist_views.WishlistItemViewSet, basename="wishlist-items")
 router.register("addresses", address_views.CustomerAddressViewSet, basename="addresses")
-router.register("payments", payment_views.PaymentViewSet, basename="payments")
 router.register("shipping-methods", shipping_views.ShippingMethodViewSet, basename="shipping-methods")
 router.register("shipments", shipping_views.ShipmentViewSet, basename="shipments")
 router.register("coupons", promotions_views.CouponViewSet, basename="coupons")
@@ -40,7 +39,7 @@ urlpatterns = [
     # Optional: keep dj-rest-auth on a different prefix to avoid collisions
     path("rest-auth/", include("dj_rest_auth.urls")),
     path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
-
+    path("payments/", include("apps.payments.urls")),
     # Resources
     path("", include(router.urls)),
 ]

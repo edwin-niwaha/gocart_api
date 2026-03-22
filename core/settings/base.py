@@ -328,7 +328,6 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
 # Email settings
-# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.smtp.EmailBackend",
@@ -346,3 +345,12 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "Africa/Kampala"
+
+# MTN Mobile Money settings
+SUBSCRIPTION_KEY = os.getenv("SUBSCRIPTION_KEY")
+MOMO_API_USER = os.getenv("MOMO_API_USER")
+MOMO_API_KEY = os.getenv("MOMO_API_KEY")
+MOMO_CALLBACK_URL = os.environ["MOMO_CALLBACK_URL"]
+MOMO_BASE_URL = os.environ["MOMO_BASE_URL"]
+MOMO_TARGET_ENVIRONMENT = os.environ["MOMO_TARGET_ENVIRONMENT"]
+MOMO_CURRENCY = os.getenv("MOMO_CURRENCY", "UGX")

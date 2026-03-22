@@ -1,60 +1,175 @@
-from rest_framework import permissions, status, viewsets
-from rest_framework.decorators import action
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
+from django.db import transaction
 
+from apps.orders.models import Order
 from .models import Payment
-from .serializers import PaymentReadSerializer, PaymentWriteSerializer
-from .services import create_payment, mark_payment_failed, mark_payment_paid
+from apps.orders.serializers import OrderReadSerializer
+from apps.orders.services import create_order, add_order_item
+from apps.cart.models import CartItem
+from apps.addresses.models import CustomerAddress
+from .serializers import MTNInitiatePaymentSerializer, PaymentStatusSerializer
+from .services import initiate_mtn_payment, refresh_mtn_payment_status, user_has_cart_items
 
 
-class IsPaymentOwnerOrAdmin(permissions.BasePermission):
-    def has_object_permission(self, request, view, obj):
-        return bool(request.user and (request.user.is_staff or obj.user == request.user))
+class MTNInitiatePaymentView(APIView):
+    permission_classes = [IsAuthenticated]
 
-
-class PaymentViewSet(viewsets.ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated, IsPaymentOwnerOrAdmin]
-    http_method_names = ["get", "post", "patch", "head", "options"]
-
-    def get_queryset(self):
-        queryset = Payment.objects.select_related("user", "order").order_by("-created_at")
-        if self.request.user.is_staff:
-            return queryset
-        return queryset.filter(user=self.request.user)
-
-    def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return PaymentWriteSerializer
-        return PaymentReadSerializer
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+    def post(self, request):
+        serializer = MTNInitiatePaymentSerializer(
+            data=request.data,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
 
-        payment = create_payment(
+        if not user_has_cart_items(request.user):
+            return Response(
+                {"detail": "Your cart is empty."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        address = serializer.context["address_instance"]
+        phone_number = serializer.validated_data["phone_number"]
+
+        payment = initiate_mtn_payment(
             user=request.user,
-            order=serializer.validated_data["order"],
-            provider=serializer.validated_data["provider"],
-            amount=serializer.validated_data["amount"],
-            currency=serializer.validated_data.get("currency", Payment.Currency.UGX),
+            phone_number=phone_number,
+            address=address,
         )
 
-        output = PaymentReadSerializer(payment, context=self.get_serializer_context())
-        return Response(output.data, status=status.HTTP_201_CREATED)
-
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
-    def mark_paid(self, request, pk=None):
-        payment = mark_payment_paid(
-            payment=self.get_object(),
-            transaction_id=request.data.get("transaction_id", ""),
-            provider_response=request.data.get("provider_response", {}),
+        return Response(
+            {
+                "reference": payment.reference,
+                "external_id": payment.external_id,
+                "status": payment.status,
+                "amount": payment.amount,
+                "currency": payment.currency,
+            },
+            status=status.HTTP_201_CREATED,
         )
-        return Response(PaymentReadSerializer(payment).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
-    def mark_failed(self, request, pk=None):
-        payment = mark_payment_failed(
-            payment=self.get_object(),
-            provider_response=request.data.get("provider_response", {}),
-        )
-        return Response(PaymentReadSerializer(payment).data, status=status.HTTP_200_OK)
+class PaymentStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, reference):
+        try:
+            payment = Payment.objects.get(reference=reference, user=request.user)
+        except Payment.DoesNotExist:
+            return Response(
+                {"detail": "Payment not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if payment.provider == Payment.Provider.MTN:
+            payment = refresh_mtn_payment_status(payment)
+
+        output = PaymentStatusSerializer(payment)
+        return Response(output.data, status=status.HTTP_200_OK)
+    
+
+class FinalizePaidOrderView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, reference):
+        with transaction.atomic():
+            try:
+                payment = (
+                    Payment.objects.select_for_update()
+                    .select_related("order")
+                    .get(reference=reference, user=request.user)
+                )
+            except Payment.DoesNotExist:
+                return Response(
+                    {"detail": "Payment not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            if payment.provider == Payment.Provider.MTN:
+                payment = refresh_mtn_payment_status(payment)
+
+            if payment.status != Payment.Status.PAID:
+                return Response(
+                    {"detail": "Payment is not successful yet."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if payment.order_id: # type: ignore
+                output = OrderReadSerializer(payment.order, context={"request": request})
+                return Response(
+                    {"order": output.data, "payment_reference": payment.reference},
+                    status=status.HTTP_200_OK,
+                )
+
+            address_id = payment.provider_response.get("address_id")
+            if not address_id:
+                return Response(
+                    {"detail": "Address information missing from payment."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                address = CustomerAddress.objects.get(id=address_id, user=request.user)
+            except CustomerAddress.DoesNotExist:
+                return Response(
+                    {"detail": "Address not found."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            cart_items = list(
+                CartItem.objects.select_related("cart", "variant", "variant__product")
+                .filter(cart__user=request.user)
+            )
+
+            if not cart_items:
+                return Response(
+                    {"detail": "Cart is empty."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            order = create_order(
+                user=request.user,
+                address=address,
+                description="Placed after successful mobile money payment",
+            )
+
+            # Mark MTN-paid order as paid immediately
+            order.status = Order.Status.PAID
+            order.save(update_fields=["status", "updated_at"])
+            
+            for cart_item in cart_items:
+                variant = (
+                    cart_item.variant.__class__.objects
+                    .select_for_update()
+                    .get(id=cart_item.variant.id)
+                )
+
+                quantity = cart_item.quantity
+
+                if variant.stock_quantity < quantity:
+                    return Response(
+                        {"detail": f"Insufficient stock for {variant.product.title} ({variant.name})"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                variant.stock_quantity -= quantity
+                variant.save(update_fields=["stock_quantity"])
+
+                add_order_item(
+                    order=order,
+                    variant=variant,
+                    quantity=quantity,
+                )
+
+            order.recalculate_total_price()
+            CartItem.objects.filter(id__in=[item.id for item in cart_items]).delete()
+
+            payment.order = order
+            payment.save(update_fields=["order", "updated_at"])
+
+            output = OrderReadSerializer(order, context={"request": request})
+            return Response(
+                {"order": output.data, "payment_reference": payment.reference},
+                status=status.HTTP_201_CREATED,
+            )
