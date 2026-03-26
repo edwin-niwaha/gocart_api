@@ -160,6 +160,7 @@ AUTHENTICATION_BACKENDS = (
     "allauth.account.auth_backends.AuthenticationBackend",
 )
 
+LOGIN_URL = "/oauth/login/google-oauth2/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 SOCIAL_AUTH_URL_NAMESPACE = "social"
@@ -178,8 +179,8 @@ SOCIALACCOUNT_AUTO_SIGNUP = True
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
         "APP": {
-            "client_id": os.getenv("GOOGLE_KEY", ""),
-            "secret": os.getenv("GOOGLE_SECRET", ""),
+            "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+            "secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
             "key": "",
         },
         "SCOPE": [
@@ -197,19 +198,17 @@ SOCIALACCOUNT_PROVIDERS = {
 # ------------------------------------------------------------------------------
 # SOCIAL DJANGO
 # ------------------------------------------------------------------------------
-SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.getenv("GOOGLE_KEY", "")
-SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.getenv("GOOGLE_SECRET", "")
+SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.getenv("GOOGLE_KEY")
+SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.getenv("GOOGLE_SECRET")
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = ["openid", "email", "profile"]
 SOCIAL_AUTH_GOOGLE_OAUTH2_EXTRA_DATA = ["first_name", "last_name"]
 
-SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = os.getenv(
-    "SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI",
-    "http://localhost:8000/oauth/complete/google-oauth2/",
-)
 
-# Optional GitHub support if you use it
-SOCIAL_AUTH_GITHUB_KEY = os.getenv("GITHUB_KEY", "")
-SOCIAL_AUTH_GITHUB_SECRET = os.getenv("GITHUB_SECRET", "")
+# For django only
+# SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = (
+#     "http://localhost:8000/oauth/complete/google-oauth2/"
+# )
+
 
 # ------------------------------------------------------------------------------
 # PASSWORD VALIDATORS
@@ -251,7 +250,7 @@ REST_FRAMEWORK = {
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
+        "rest_framework.permissions.AllowAny",
     ),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",

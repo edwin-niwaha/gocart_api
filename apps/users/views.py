@@ -1,10 +1,11 @@
 from django.contrib.auth import get_user_model
 from rest_framework import permissions, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.exceptions import ValidationError
 
 from .serializers import (
     GoogleLoginSerializer,
@@ -13,10 +14,7 @@ from .serializers import (
     RegisterSerializer,
     UserSerializer,
 )
-from .services import (
-    authenticate_with_google,
-    generate_tokens_for_user,
-)
+from .services import authenticate_with_google, generate_tokens_for_user
 
 User = get_user_model()
 
@@ -24,6 +22,7 @@ User = get_user_model()
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
     queryset = User.objects.all().order_by("-created_at")
 
 
@@ -56,7 +55,7 @@ class LoginView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
-        user = serializer.validated_data["user"] # type: ignore
+        user = serializer.validated_data["user"]  # type: ignore
         tokens = generate_tokens_for_user(user)
 
         return Response(
@@ -71,6 +70,7 @@ class LoginView(APIView):
 class MeView(RetrieveAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def get_object(self):
         return self.request.user
@@ -78,18 +78,21 @@ class MeView(RetrieveAPIView):
 
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
 
     def post(self, request, *args, **kwargs):
         serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        refresh_token = serializer.validated_data["refresh"] # type: ignore
+        refresh_token = serializer.validated_data["refresh"]  # type: ignore
 
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()
         except Exception as exc:
-            raise ValidationError({"refresh": "Invalid or expired refresh token."}) from exc
+            raise ValidationError(
+                {"refresh": "Invalid or expired refresh token."}
+            ) from exc
 
         return Response(
             {"detail": "Logout successful."},
@@ -105,7 +108,7 @@ class GoogleLoginAPIView(APIView):
         serializer.is_valid(raise_exception=True)
 
         result = authenticate_with_google(
-            access_token=serializer.validated_data["access_token"], # type: ignore
+            access_token=serializer.validated_data["access_token"],  # type: ignore
             request=request,
         )
 
