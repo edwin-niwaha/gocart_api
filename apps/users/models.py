@@ -49,7 +49,6 @@ class CustomUser(AbstractUser):
         ADMIN = "ADMIN", _("Admin")
 
     email = models.EmailField(unique=True, db_index=True)
-    # profile_picture_url = models.URLField(blank=True, null=True)
     avatar = CloudinaryField(
         "avatar",
         folder="gocart/avatars",

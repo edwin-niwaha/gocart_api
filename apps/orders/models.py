@@ -89,6 +89,7 @@ class OrderItem(TimeStampedModel):
     )
 
     product_title = models.CharField(max_length=255, editable=False)
+    product_image = models.URLField(blank=True, null=True, editable=False)
     variant_name = models.CharField(max_length=100, editable=False)
     variant_sku = models.CharField(max_length=100, editable=False)
 
@@ -134,11 +135,29 @@ class OrderItem(TimeStampedModel):
                 {"variant": "Selected variant does not belong to the selected product."}
             )
 
+    def _get_snapshot_product_image(self) -> str | None:
+        if not self.variant_id:
+            return None
+
+        product = self.variant.product
+
+        if product.hero_image:
+            return product.hero_image
+
+        if isinstance(product.image_urls, list) and product.image_urls:
+            first_image = product.image_urls[0]
+            return first_image or None
+
+        return None
+
     def save(self, *args, **kwargs):
         if self.variant_id:
             variant = self.variant
-            self.product = variant.product
-            self.product_title = variant.product.title
+            product = variant.product
+
+            self.product = product
+            self.product_title = product.title
+            self.product_image = self._get_snapshot_product_image()
             self.variant_name = variant.name
             self.variant_sku = variant.sku
 

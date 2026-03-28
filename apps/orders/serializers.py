@@ -15,6 +15,7 @@ EDITABLE_ORDER_STATUSES = {
 class OrderItemReadSerializer(serializers.ModelSerializer):
     product_title = serializers.CharField(read_only=True)
     product_slug = serializers.CharField(source="product.slug", read_only=True)
+    product_image = serializers.CharField(read_only=True)
     variant_name = serializers.CharField(read_only=True)
     variant_sku = serializers.CharField(read_only=True)
     line_total = serializers.ReadOnlyField()
@@ -26,6 +27,7 @@ class OrderItemReadSerializer(serializers.ModelSerializer):
             "product",
             "product_title",
             "product_slug",
+            "product_image",
             "variant",
             "variant_name",
             "variant_sku",
@@ -37,6 +39,20 @@ class OrderItemReadSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    def get_product_image(self, obj):
+            product = getattr(obj, "product", None)
+            if not product:
+                return None
+
+            # priority 1: hero image
+            if product.hero_image:
+                return product.hero_image
+
+            # priority 2: first image from list
+            if product.image_urls:
+                return product.image_urls[0]
+
+            return None
 
 class OrderReadSerializer(serializers.ModelSerializer):
     items = OrderItemReadSerializer(many=True, read_only=True)

@@ -1,3 +1,4 @@
+from django.db.models.deletion import ProtectedError
 from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
 
@@ -18,7 +19,9 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAddressOwner]
 
     def get_queryset(self):
-        queryset = CustomerAddress.objects.select_related("user").order_by("-is_default", "-created_at")
+        queryset = CustomerAddress.objects.select_related("user").order_by(
+            "-is_default", "-created_at"
+        )
         if self.request.user.is_staff:
             return queryset
         return queryset.filter(user=self.request.user)
@@ -51,6 +54,20 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        try:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": "This address cannot be deleted because it is linked to existing records."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     def perform_destroy(self, instance):
         delete_address(instance=instance)
