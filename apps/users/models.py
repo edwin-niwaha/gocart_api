@@ -1,5 +1,12 @@
+from datetime import timedelta
+import hashlib
+import hmac
+import secrets
+from cloudinary.models import CloudinaryField
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -10,9 +17,14 @@ class CustomUserManager(BaseUserManager):
         if not email:
             raise ValueError("Email address is required")
 
-        email = self.normalize_email(email)
+        email = self.normalize_email(email).lower()
         user = self.model(email=email, username=username, **extra_fields)
-        user.set_password(password)
+
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
+
         user.save(using=self._db)
         return user
 
@@ -21,6 +33,7 @@ class CustomUserManager(BaseUserManager):
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
         extra_fields.setdefault("user_type", CustomUser.UserType.ADMIN)
+        extra_fields.setdefault("is_email_verified", True)
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True.")
@@ -36,20 +49,35 @@ class CustomUser(AbstractUser):
         ADMIN = "ADMIN", _("Admin")
 
     email = models.EmailField(unique=True, db_index=True)
-    profile_picture_url = models.URLField(blank=True, null=True)
+    # profile_picture_url = models.URLField(blank=True, null=True)
+    avatar = CloudinaryField(
+        "avatar",
+        folder="gocart/avatars",
+        transformation={
+            "width": 300,
+            "height": 300,
+            "crop": "fill",
+            "gravity": "face",
+        },
+        default="default.jpg",
+        blank=True,
+        null=True,
+    )
     user_type = models.CharField(
         max_length=10,
         choices=UserType.choices,
         default=UserType.USER,
         db_index=True,
     )
+    is_email_verified = models.BooleanField(default=False, db_index=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
 
-    objects = CustomUserManager() # type: ignore
+    objects = CustomUserManager()  # type: ignore
 
     class Meta:
         ordering = ["-created_at"]
@@ -58,13 +86,76 @@ class CustomUser(AbstractUser):
         indexes = [
             models.Index(fields=["email"]),
             models.Index(fields=["user_type"]),
+            models.Index(fields=["is_email_verified"]),
             models.Index(fields=["created_at"]),
         ]
 
     def save(self, *args, **kwargs):
         if self.email:
-            self.email = self.__class__.objects.normalize_email(self.email)
+            self.email = self.__class__.objects.normalize_email(self.email).lower()
         super().save(*args, **kwargs)
 
     def __str__(self):
         return self.email
+
+
+class EmailOTP(models.Model):
+    class Purpose(models.TextChoices):
+        VERIFY_EMAIL = "VERIFY_EMAIL", _("Verify Email")
+        RESET_PASSWORD = "RESET_PASSWORD", _("Reset Password")
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="email_otps",
+    )
+    email = models.EmailField(db_index=True)
+    purpose = models.CharField(max_length=30, choices=Purpose.choices, db_index=True)
+    code_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(blank=True, null=True)
+    attempts = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=5)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["email", "purpose"]),
+            models.Index(fields=["user", "purpose"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    @staticmethod
+    def generate_code(length=6) -> str:
+        digits = "0123456789"
+        return "".join(secrets.choice(digits) for _ in range(length))
+
+    @staticmethod
+    def hash_code(code: str) -> str:
+        return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def create_otp(cls, *, user, email: str, purpose: str, ttl_minutes: int = 10):
+        raw_code = cls.generate_code()
+        otp = cls.objects.create(
+            user=user,
+            email=email,
+            purpose=purpose,
+            code_hash=cls.hash_code(raw_code),
+            expires_at=timezone.now() + timedelta(minutes=ttl_minutes),
+        )
+        return otp, raw_code
+
+    def is_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    def is_used(self) -> bool:
+        return self.used_at is not None
+
+    def can_attempt(self) -> bool:
+        return self.attempts < self.max_attempts
+
+    def verify_code(self, raw_code: str) -> bool:
+        incoming_hash = self.hash_code(raw_code)
+        return hmac.compare_digest(self.code_hash, incoming_hash)

@@ -95,7 +95,7 @@ class Migration(migrations.Migration):
                     "email",
                     models.EmailField(db_index=True, max_length=254, unique=True),
                 ),
-                ("profile_picture_url", models.URLField(blank=True, null=True)),
+                ("avatar", models.URLField(blank=True, null=True)),
                 (
                     "user_type",
                     models.CharField(

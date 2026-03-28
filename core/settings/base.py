@@ -71,6 +71,8 @@ THIRD_PARTY_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "social_django",
+    "cloudinary",
+    "cloudinary_storage",
 ]
 
 LOCAL_APPS = [
@@ -257,6 +259,11 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": int(os.getenv("PAGE_SIZE", 10)),
+
+    "DEFAULT_THROTTLE_RATES": {
+        "auth_anon": "10/min",
+        "auth_user": "20/min",
+    }
 }
 
 # ------------------------------------------------------------------------------
@@ -288,10 +295,6 @@ REST_AUTH = {
 # ------------------------------------------------------------------------------
 CORS_ALLOW_CREDENTIALS = True
 
-# ------------------------------------------------------------------------------
-# EMAIL
-# ------------------------------------------------------------------------------
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@gocart.local")
 
 # ------------------------------------------------------------------------------
 # LOGGING
@@ -334,8 +337,8 @@ EMAIL_BACKEND = os.getenv(
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_USE_TLS = True
 EMAIL_PORT = 587
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
@@ -353,3 +356,20 @@ MOMO_CALLBACK_URL = os.environ["MOMO_CALLBACK_URL"]
 MOMO_BASE_URL = os.environ["MOMO_BASE_URL"]
 MOMO_TARGET_ENVIRONMENT = os.environ["MOMO_TARGET_ENVIRONMENT"]
 MOMO_CURRENCY = os.getenv("MOMO_CURRENCY", "UGX")
+
+
+# Cloudinary storage configuration
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": CLOUDINARY_CLOUD_NAME,
+    "API_KEY": CLOUDINARY_API_KEY,
+    "API_SECRET": CLOUDINARY_API_SECRET,
+}
+
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+
+# Cloudinary media URL online
+MEDIA_URL = f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/"

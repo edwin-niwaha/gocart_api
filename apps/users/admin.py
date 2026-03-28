@@ -13,12 +13,16 @@ class CustomUserAdmin(UserAdmin):
         "email",
         "username",
         "user_type",
-        "profile_image_preview",
+        "avatar_preview",
         "is_staff",
         "created_at",
     )
 
-    readonly_fields = ("created_at", "updated_at", "profile_image_preview")
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "avatar_preview",
+    )
 
     fieldsets = (
         (None, {"fields": ("email", "username", "password")}),
@@ -26,8 +30,8 @@ class CustomUserAdmin(UserAdmin):
             "Profile",
             {
                 "fields": (
-                    "profile_picture_url",
-                    "profile_image_preview",
+                    "avatar",
+                    "avatar_preview",
                 )
             },
         ),
@@ -50,12 +54,16 @@ class CustomUserAdmin(UserAdmin):
         ),
     )
 
-    def profile_image_preview(self, obj):
-        if obj.profile_picture_url:
-            return format_html(
-                '<img src="{}" width="40" height="40" style="border-radius:50%;" />',
-                obj.profile_picture_url,
-            )
+    # ✅ FIXED preview
+    def avatar_preview(self, obj):
+        if obj.avatar:
+            try:
+                return format_html(
+                    '<img src="{}" width="50" height="50" style="border-radius:50%; object-fit:cover;" />',
+                    obj.avatar.url,
+                )
+            except Exception:
+                return "Invalid image"
         return "No Image"
 
-    profile_image_preview.short_description = "Profile"
+    avatar_preview.short_description = "Avatar"
