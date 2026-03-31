@@ -68,8 +68,8 @@ def send_order_confirmation_email(order: Order) -> None:
     _send_templated_email(
         subject=subject,
         to=[recipient],
-        text_template="emails/order_confirmation.txt",
-        html_template="emails/order_confirmation.html",
+        text_template="order_emails/order_confirmation.txt",
+        html_template="order_emails/order_confirmation.html",
         context=context,
     )
 
@@ -86,8 +86,8 @@ def send_new_order_admin_email(order: Order) -> None:
     _send_templated_email(
         subject=subject,
         to=[recipient],
-        text_template="emails/new_order_admin.txt",
-        html_template="emails/new_order_admin.html",
+        text_template="order_emails/new_order_admin.txt",
+        html_template="order_emails/new_order_admin.html",
         context=context,
     )
 
@@ -105,8 +105,8 @@ def send_customer_order_status_email(order: Order) -> None:
     _send_templated_email(
         subject=subject,
         to=[recipient],
-        text_template="emails/customer_order_status.txt",
-        html_template="emails/customer_order_status.html",
+        text_template="order_emails/customer_order_status.txt",
+        html_template="order_emails/customer_order_status.html",
         context=context,
     )
 
@@ -124,7 +124,7 @@ def send_admin_order_status_email(order: Order) -> None:
     _send_templated_email(
         subject=subject,
         to=[recipient],
-        text_template="emails/admin_order_status.txt",
-        html_template="emails/admin_order_status.html",
+        text_template="order_emails/admin_order_status.txt",
+        html_template="order_emails/admin_order_status.html",
         context=context,
     )

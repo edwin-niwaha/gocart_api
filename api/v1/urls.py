@@ -11,6 +11,7 @@ from apps.payments import views as payment_views
 from apps.shipping import views as shipping_views
 from apps.promotions import views as promotions_views
 from apps.notifications import views as notification_views
+from apps.common import views as common_views
 
 router = DefaultRouter()
 
@@ -31,6 +32,8 @@ router.register("shipping-methods", shipping_views.ShippingMethodViewSet, basena
 router.register("shipments", shipping_views.ShipmentViewSet, basename="shipments")
 router.register("coupons", promotions_views.CouponViewSet, basename="coupons")
 router.register("notifications", notification_views.NotificationViewSet, basename="notifications")
+router.register("contact", common_views.ContactMessageViewSet, basename="contact-message")
+
 
 urlpatterns = [
     # Custom auth

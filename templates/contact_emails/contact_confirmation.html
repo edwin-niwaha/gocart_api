@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <body style="margin:0;padding:0;background-color:#f4f7fb;font-family:Arial,sans-serif;color:#111827;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f7fb;margin:0;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background-color:#ffffff;border-radius:14px;overflow:hidden;">
+            
+            <!-- Header -->
+            <tr>
+              <td style="background-color:#1d4ed8;padding:28px 32px;color:#ffffff;">
+                <h1 style="margin:0;font-size:24px;line-height:1.3;font-weight:700;">GoCart</h1>
+                <p style="margin:6px 0 0;font-size:14px;line-height:1.5;opacity:0.95;">Customer Support</p>
+              </td>
+            </tr>
+
+            <!-- Body -->
+            <tr>
+              <td style="padding:32px;">
+                <h2 style="margin:0 0 16px;font-size:22px;line-height:1.4;color:#111827;">We’ve received your message</h2>
+
+                <p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#374151;">
+                  Hello <strong>{{ name }}</strong>,
+                </p>
+
+                <p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#374151;">
+                  Thank you for contacting <strong>{{ shop_name }}</strong>. This email confirms that your message has been received successfully by our support team.
+                </p>
+
+                <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#374151;">
+                  We will review your request and get back to you as soon as possible.
+                </p>
+
+                <!-- Message Summary -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">
+                  <tr>
+                    <td style="padding:18px 20px;">
+                      <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;color:#6b7280;">
+                        Your Message
+                      </p>
+                      <p style="margin:0;font-size:15px;line-height:1.7;color:#111827;">
+                        {{ message }}
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Response time -->
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#eff6ff;border-left:4px solid #2563eb;border-radius:8px;">
+                  <tr>
+                    <td style="padding:14px 16px;">
+                      <p style="margin:0;font-size:14px;line-height:1.6;color:#1e3a8a;">
+                        <strong>Estimated response time:</strong> within a few hours during business hours.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:0 0 8px;font-size:15px;line-height:1.7;color:#374151;">
+                  Kind regards,
+                </p>
+                <p style="margin:0;font-size:15px;line-height:1.7;color:#111827;font-weight:700;">
+                  GoCart Support Team
+                </p>
+              </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+              <td style="padding:20px 32px;background-color:#111827;">
+                <p style="margin:0 0 6px;font-size:13px;line-height:1.6;color:#d1d5db;">
+                  Need urgent assistance?
+                </p>
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#ffffff;">
+                  Contact us at <a href="mailto:{{ support_email }}" style="color:#93c5fd;text-decoration:none;">{{ support_email }}</a>
+                </p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
