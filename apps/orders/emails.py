@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Callable
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -13,19 +14,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+SHOP_NAME = "GoCart"
+
+
+@dataclass(frozen=True)
+class EmailSpec:
+    subject_builder: Callable[[Any], str]
+    recipient_getter: Callable[[Any], str | None]
+    text_template: str
+    html_template: str
+    skip_log_message: str
+
+
 def _display_name(order: Order) -> str:
     full_name = order.user.get_full_name().strip()
     return full_name or order.user.email or "Customer"
 
 
 def _common_context(order: Order) -> dict[str, Any]:
-    items = order.items.select_related("product", "variant").all()
     return {
         "order": order,
         "user": order.user,
-        "items": items,
+        "items": order.items.all(),
         "display_name": _display_name(order),
-        "shop_name": "GoCart",
+        "shop_name": SHOP_NAME,
         "support_email": settings.DEFAULT_FROM_EMAIL,
         "admin_email": settings.DEFAULT_FROM_EMAIL,
     }
@@ -34,13 +46,13 @@ def _common_context(order: Order) -> dict[str, Any]:
 def _send_templated_email(
     *,
     subject: str,
-    to: list[str],
+    recipient: str | None,
     text_template: str,
     html_template: str,
     context: dict[str, Any],
 ) -> None:
-    if not to:
-        logger.warning("Skipped email with empty recipient list. subject=%s", subject)
+    if not recipient:
+        logger.warning("Skipped email: %s | subject=%s", "missing recipient", subject)
         return
 
     text_body = render_to_string(text_template, context)
@@ -50,81 +62,82 @@ def _send_templated_email(
         subject=subject,
         body=text_body,
         from_email=settings.DEFAULT_FROM_EMAIL,
-        to=to,
+        to=[recipient],
     )
     message.attach_alternative(html_body, "text/html")
     message.send(fail_silently=False)
 
 
-def send_order_confirmation_email(order: Order) -> None:
-    recipient = order.user.email
+def _send_order_email(order: Order, spec: EmailSpec, *, extra_context: dict[str, Any] | None = None) -> None:
+    context = _common_context(order)
+    if extra_context:
+        context.update(extra_context)
+
+    recipient = spec.recipient_getter(order)
     if not recipient:
-        logger.warning("Order confirmation skipped: order_id=%s has no user email", order.id)
+        logger.warning(spec.skip_log_message, order.id)
         return
 
-    context = _common_context(order)
-    subject = f"Order received: {order.slug}"
-
     _send_templated_email(
-        subject=subject,
-        to=[recipient],
-        text_template="order_emails/order_confirmation.txt",
-        html_template="order_emails/order_confirmation.html",
+        subject=spec.subject_builder(order),
+        recipient=recipient,
+        text_template=spec.text_template,
+        html_template=spec.html_template,
         context=context,
     )
+
+
+ORDER_EMAILS: dict[str, EmailSpec] = {
+    "order_confirmation": EmailSpec(
+        subject_builder=lambda order: f"Order received: {order.slug}",
+        recipient_getter=lambda order: order.user.email,
+        text_template="order_emails/order_confirmation.txt",
+        html_template="order_emails/order_confirmation.html",
+        skip_log_message="Order confirmation skipped: order_id=%s has no user email",
+    ),
+    "new_order_admin": EmailSpec(
+        subject_builder=lambda order: f"New order placed: {order.slug}",
+        recipient_getter=lambda order: settings.DEFAULT_FROM_EMAIL,
+        text_template="order_emails/new_order_admin.txt",
+        html_template="order_emails/new_order_admin.html",
+        skip_log_message="Admin new-order email skipped: order_id=%s has no admin email configured",
+    ),
+    "customer_order_status": EmailSpec(
+        subject_builder=lambda order: f"Order update: {order.slug} is now {order.get_status_display()}",
+        recipient_getter=lambda order: order.user.email,
+        text_template="order_emails/customer_order_status.txt",
+        html_template="order_emails/customer_order_status.html",
+        skip_log_message="Customer status email skipped: order_id=%s has no user email",
+    ),
+    "admin_order_status": EmailSpec(
+        subject_builder=lambda order: f"Order status changed: {order.slug} is now {order.get_status_display()}",
+        recipient_getter=lambda order: settings.DEFAULT_FROM_EMAIL,
+        text_template="order_emails/admin_order_status.txt",
+        html_template="order_emails/admin_order_status.html",
+        skip_log_message="Admin status email skipped: order_id=%s has no admin email configured",
+    ),
+}
+
+
+def send_order_confirmation_email(order: Order) -> None:
+    _send_order_email(order, ORDER_EMAILS["order_confirmation"])
 
 
 def send_new_order_admin_email(order: Order) -> None:
-    recipient = settings.DEFAULT_FROM_EMAIL
-    if not recipient:
-        logger.warning("Admin new-order email skipped: DEFAULT_FROM_EMAIL is empty")
-        return
-
-    context = _common_context(order)
-    subject = f"New order placed: {order.slug}"
-
-    _send_templated_email(
-        subject=subject,
-        to=[recipient],
-        text_template="order_emails/new_order_admin.txt",
-        html_template="order_emails/new_order_admin.html",
-        context=context,
-    )
+    _send_order_email(order, ORDER_EMAILS["new_order_admin"])
 
 
 def send_customer_order_status_email(order: Order) -> None:
-    recipient = order.user.email
-    if not recipient:
-        logger.warning("Customer status email skipped: order_id=%s has no user email", order.id)
-        return
-
-    context = _common_context(order)
-    context["status_label"] = order.get_status_display()
-    subject = f"Order update: {order.slug} is now {order.get_status_display()}"
-
-    _send_templated_email(
-        subject=subject,
-        to=[recipient],
-        text_template="order_emails/customer_order_status.txt",
-        html_template="order_emails/customer_order_status.html",
-        context=context,
+    _send_order_email(
+        order,
+        ORDER_EMAILS["customer_order_status"],
+        extra_context={"status_label": order.get_status_display()},
     )
 
 
 def send_admin_order_status_email(order: Order) -> None:
-    recipient = settings.DEFAULT_FROM_EMAIL
-    if not recipient:
-        logger.warning("Admin status email skipped: DEFAULT_FROM_EMAIL is empty")
-        return
-
-    context = _common_context(order)
-    context["status_label"] = order.get_status_display()
-    subject = f"Order status changed: {order.slug} is now {order.get_status_display()}"
-
-    _send_templated_email(
-        subject=subject,
-        to=[recipient],
-        text_template="order_emails/admin_order_status.txt",
-        html_template="order_emails/admin_order_status.html",
-        context=context,
+    _send_order_email(
+        order,
+        ORDER_EMAILS["admin_order_status"],
+        extra_context={"status_label": order.get_status_display()},
     )

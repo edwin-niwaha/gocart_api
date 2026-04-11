@@ -34,3 +34,31 @@ class Notification(TimeStampedModel):
 
     def __str__(self):
         return f"{self.user.email} - {self.title}"
+
+
+
+class DeviceToken(TimeStampedModel):
+    class Platform(models.TextChoices):
+        ANDROID = "android", "Android"
+        IOS = "ios", "iOS"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="device_tokens",
+    )
+    token = models.TextField(unique=True, db_index=True)
+    platform = models.CharField(max_length=20, choices=Platform.choices)
+    device_id = models.CharField(max_length=255, blank=True)
+    app_version = models.CharField(max_length=50, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "is_active"]),
+            models.Index(fields=["platform", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} - {self.platform}"

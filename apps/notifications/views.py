@@ -2,8 +2,8 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import Notification
-from .serializers import NotificationSerializer
+from .models import Notification, DeviceToken
+from .serializers import NotificationSerializer, DeviceTokenSerializer
 from .services import mark_all_notifications_read, mark_notification_read
 
 
@@ -38,3 +38,24 @@ class NotificationViewSet(viewsets.ModelViewSet):
             {"detail": f"{updated_count} notifications marked as read."},
             status=status.HTTP_200_OK,
         )
+    
+
+class DeviceTokenViewSet(viewsets.GenericViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = DeviceTokenSerializer
+    queryset = DeviceToken.objects.all()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Push token registered."}, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="unregister")
+    def unregister(self, request, *args, **kwargs):
+        token = request.data.get("token")
+        if not token:
+            return Response({"detail": "token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        DeviceToken.objects.filter(user=request.user, token=token).update(is_active=False)
+        return Response({"detail": "Push token unregistered."}, status=status.HTTP_200_OK)

@@ -1,0 +1,1 @@
+cred = credentials.Certificate(settings.FIREBASE_SERVICE_ACCOUNT_PATH)

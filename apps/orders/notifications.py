@@ -10,6 +10,7 @@ from .tasks import (
     send_customer_order_status_email_task,
     send_new_order_admin_email_task,
     send_order_confirmation_email_task,
+    send_order_push_notification_task,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ def queue_order_status_notifications(order_id: int, old_status: str, new_status:
     def _enqueue() -> None:
         if new_status in CUSTOMER_NOTIFY_STATUSES:
             send_customer_order_status_email_task.delay(order_id)
+            send_order_push_notification_task.delay(order_id)
 
         if new_status in ADMIN_NOTIFY_STATUSES:
             send_admin_order_status_email_task.delay(order_id)

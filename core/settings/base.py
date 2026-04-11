@@ -374,3 +374,16 @@ DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 # Cloudinary media URL online
 MEDIA_URL = f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/"
+
+
+
+FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv(
+    "FIREBASE_SERVICE_ACCOUNT_PATH",
+    str(BASE_DIR / "core" / "firebase" / "service-account.json"),
+)
+
+# 🔥 Add this debug check
+if not Path(FIREBASE_SERVICE_ACCOUNT_PATH).exists():
+    raise FileNotFoundError(
+        f"Firebase service account not found: {FIREBASE_SERVICE_ACCOUNT_PATH}"
+    )
