@@ -9,6 +9,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from apps.tenants.models import TenantMembership
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import EmailOTP
@@ -50,7 +52,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
-    queryset = User.objects.all().order_by("-created_at")
+    queryset = User.objects.prefetch_related("tenant_memberships__tenant").all().order_by("-created_at")
 
 
 class RegisterView(APIView):
@@ -384,3 +386,12 @@ class VerifyEmailView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+from apps.tenants.permissions import get_user_tenant_role
+
+class CurrentTenantRoleView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        role = get_user_tenant_role(request.user, getattr(request, "tenant", None))
+        return Response({"tenant": getattr(request.tenant, "slug", None), "role": role}, status=status.HTTP_200_OK)

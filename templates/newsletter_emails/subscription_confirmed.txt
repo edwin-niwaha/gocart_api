@@ -1,0 +1,6 @@
+Subscription confirmed
+
+Your email has been confirmed successfully.
+You are now subscribed to {{ shop_name }} updates.
+
+Support: {{ support_email }}

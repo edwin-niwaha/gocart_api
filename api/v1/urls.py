@@ -1,20 +1,22 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
+
 from apps.addresses import views as address_views
 from apps.cart import views as cart_views
+from apps.common import views as common_views
+from apps.notifications import views as notification_views
 from apps.orders import views as order_views
+from apps.payments import views as payment_views
 from apps.products import views as product_views
+from apps.promotions import views as promotions_views
 from apps.reviews import views as review_views
+from apps.shipping import views as shipping_views
+from apps.tenants import views as tenant_views
 from apps.users import views as user_views
 from apps.wishlist import views as wishlist_views
-from apps.payments import views as payment_views
-from apps.shipping import views as shipping_views
-from apps.promotions import views as promotions_views
-from apps.notifications import views as notification_views
-from apps.common import views as common_views
 
 router = DefaultRouter()
-
+router.register("tenants", tenant_views.TenantViewSet, basename="tenants")
 router.register("users", user_views.UserViewSet, basename="users")
 router.register("products", product_views.ProductViewSet, basename="products")
 router.register("categories", product_views.CategoryViewSet, basename="categories")
@@ -32,17 +34,21 @@ router.register("shipping-methods", shipping_views.ShippingMethodViewSet, basena
 router.register("shipments", shipping_views.ShipmentViewSet, basename="shipments")
 router.register("coupons", promotions_views.CouponViewSet, basename="coupons")
 router.register("notifications", notification_views.NotificationViewSet, basename="notifications")
+router.register("device-tokens", notification_views.DeviceTokenViewSet, basename="device-tokens")
 router.register("contact", common_views.ContactMessageViewSet, basename="contact-message")
-
+router.register("newsletter", common_views.NewsletterSubscribeViewSet, basename="newsletter")
+router.register("support-messages", common_views.SupportMessageViewSet, basename="support-messages")
+router.register("audit-logs", common_views.AuditLogViewSet, basename="audit-logs")
 
 urlpatterns = [
-    # Custom auth
+    path("tenants/current/branding/", tenant_views.CurrentTenantBrandingView.as_view(), name="tenant-branding"),
+    path("tenants/current/settings/", tenant_views.CurrentTenantSettingsView.as_view(), name="tenant-settings"),
+    path("tenants/current/feature-flags/", tenant_views.CurrentTenantFeatureFlagView.as_view(), name="tenant-feature-flags"),
+    path("tenants/current/memberships/", tenant_views.CurrentTenantMembershipListCreateView.as_view(), name="tenant-memberships"),
+    path("tenants/current/memberships/<int:membership_id>/", tenant_views.CurrentTenantMembershipDetailView.as_view(), name="tenant-membership-detail"),
     path("auth/", include("apps.users.urls")),
-
-    # Optional: keep dj-rest-auth on a different prefix to avoid collisions
     path("rest-auth/", include("dj_rest_auth.urls")),
     path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
     path("payments/", include("apps.payments.urls")),
-    # Resources
     path("", include(router.urls)),
 ]

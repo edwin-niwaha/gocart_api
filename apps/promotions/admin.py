@@ -1,9 +1,10 @@
+from apps.tenants.admin_mixins import TenantScopedAdminMixin
 from django.contrib import admin
 from .models import Coupon
 
 
 @admin.register(Coupon)
-class CouponAdmin(admin.ModelAdmin):
+class CouponAdmin(TenantScopedAdminMixin):
     list_display = (
         "code",
         "discount_type",

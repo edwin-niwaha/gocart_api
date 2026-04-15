@@ -1,6 +1,7 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
 
+from apps.tenants.permissions import is_platform_admin
 from .models import Wishlist, WishlistItem
 from .serializers import (
     WishlistItemReadSerializer,
@@ -13,7 +14,7 @@ from .services import add_item_to_wishlist, get_or_create_wishlist, remove_wishl
 
 class IsWishlistOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        if request.user and request.user.is_staff:
+        if is_platform_admin(request.user):
             return True
 
         owner = getattr(obj, "user", None)
@@ -36,9 +37,9 @@ class WishlistViewSet(viewsets.ModelViewSet):
             "items__product",
             "items__product__category",
         )
-        if self.request.user.is_staff:
+        if is_platform_admin(self.request.user):
             return queryset
-        return queryset.filter(user=self.request.user)
+        return queryset.filter(user=self.request.user, items__product__tenant=self.request.tenant).distinct()
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -61,9 +62,9 @@ class WishlistItemViewSet(viewsets.ModelViewSet):
             "product",
             "product__category",
         )
-        if self.request.user.is_staff:
+        if is_platform_admin(self.request.user):
             return queryset
-        return queryset.filter(wishlist__user=self.request.user)
+        return queryset.filter(wishlist__user=self.request.user, product__tenant=self.request.tenant)
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:

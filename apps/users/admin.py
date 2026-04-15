@@ -15,6 +15,7 @@ class CustomUserAdmin(UserAdmin):
         "user_type",
         "avatar_preview",
         "is_staff",
+        "active_tenant_display",
         "created_at",
     )
 
@@ -67,3 +68,8 @@ class CustomUserAdmin(UserAdmin):
         return "No Image"
 
     avatar_preview.short_description = "Avatar"
+    def active_tenant_display(self, obj):
+        tenant = obj.active_tenant
+        return tenant.slug if tenant else "—"
+
+    active_tenant_display.short_description = "Active tenant"

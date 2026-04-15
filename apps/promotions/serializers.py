@@ -57,8 +57,13 @@ class CouponValidateSerializer(serializers.Serializer):
         code = attrs["code"].upper()
         amount = attrs["amount"]
 
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        queryset = Coupon.objects.all()
+        if tenant is not None:
+            queryset = queryset.filter(tenant=tenant)
+
         try:
-            coupon = Coupon.objects.get(code=code)
+            coupon = queryset.get(code=code)
         except Coupon.DoesNotExist:
             raise serializers.ValidationError({"code": "Invalid coupon code."})
 

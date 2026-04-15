@@ -1,3 +1,4 @@
+from apps.tenants.admin_mixins import TenantScopedAdminMixin
 from django.contrib import admin
 from .models import Category, Product, ProductVariant
 
@@ -6,6 +7,7 @@ class ProductVariantInline(admin.TabularInline):
     model = ProductVariant
     extra = 1
     fields = (
+        "tenant",
         "name",
         "sku",
         "price",
@@ -14,19 +16,21 @@ class ProductVariantInline(admin.TabularInline):
         "is_active",
         "sort_order",
     )
+    readonly_fields = ("tenant",)
 
 
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "is_active", "created_at")
-    list_filter = ("is_active", "created_at")
-    search_fields = ("name", "slug")
+class CategoryAdmin(TenantScopedAdminMixin):
+    list_display = ("name", "tenant", "slug", "is_active", "created_at")
+    list_filter = ("tenant", "is_active", "created_at")
+    search_fields = ("name", "slug", "tenant__name", "tenant__slug")
     prepopulated_fields = {"slug": ("name",)}
-    ordering = ("name",)
+    autocomplete_fields = ("tenant",)
+    ordering = ("tenant", "name")
 
 
 @admin.register(Product)
-class ProductAdmin(admin.ModelAdmin):
+class ProductAdmin(TenantScopedAdminMixin):
     inlines = [ProductVariantInline]
 
     def featured_badge(self, obj):
@@ -47,6 +51,7 @@ class ProductAdmin(admin.ModelAdmin):
 
     list_display = (
         "title",
+        "tenant",
         "category",
         "base_price_display",
         "variant_count",
@@ -56,6 +61,7 @@ class ProductAdmin(admin.ModelAdmin):
     )
 
     list_filter = (
+        "tenant",
         "category",
         "is_active",
         "is_featured",
@@ -68,50 +74,30 @@ class ProductAdmin(admin.ModelAdmin):
         "title",
         "slug",
         "description",
+        "tenant__name",
         "variants__name",
         "variants__sku",
     )
 
     prepopulated_fields = {"slug": ("title",)}
-    autocomplete_fields = ("category",)
+    autocomplete_fields = ("tenant", "category")
     readonly_fields = ("created_at", "updated_at")
 
     fieldsets = (
-        ("Basic Information", {
-            "fields": (
-                "title",
-                "slug",
-                "category",
-                "description",
-            )
-        }),
-        ("Images", {
-            "fields": (
-                "hero_image",
-                "image_urls",
-            )
-        }),
-        ("Status", {
-            "fields": (
-                "is_active",
-                "is_featured",
-            )
-        }),
-        ("Timestamps", {
-            "fields": (
-                "created_at",
-                "updated_at",
-            )
-        }),
+        ("Basic Information", {"fields": ("tenant", "title", "slug", "category", "description")}),
+        ("Images", {"fields": ("hero_image", "image_urls")}),
+        ("Status", {"fields": ("is_active", "is_featured")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
 
-    ordering = ("-created_at",)
+    ordering = ("tenant", "-created_at")
 
 
 @admin.register(ProductVariant)
-class ProductVariantAdmin(admin.ModelAdmin):
+class ProductVariantAdmin(TenantScopedAdminMixin):
     list_display = (
         "product",
+        "tenant",
         "name",
         "sku",
         "price",
@@ -120,7 +106,7 @@ class ProductVariantAdmin(admin.ModelAdmin):
         "sort_order",
         "created_at",
     )
-    list_filter = ("is_active", "product__category", "created_at")
-    search_fields = ("product__title", "name", "sku")
-    autocomplete_fields = ("product",)
-    ordering = ("product", "sort_order", "price")
+    list_filter = ("tenant", "is_active", "product__category", "created_at")
+    search_fields = ("product__title", "tenant__name", "name", "sku")
+    autocomplete_fields = ("tenant", "product")
+    ordering = ("tenant", "product", "sort_order", "price")

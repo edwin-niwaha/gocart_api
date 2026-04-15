@@ -12,6 +12,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         model = ProductVariant
         fields = (
             "id",
+            "tenant",
             "product",
             "name",
             "sku",
@@ -63,6 +64,16 @@ class CartItemWriteSerializer(serializers.ModelSerializer):
             "quantity",
         )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        if tenant is not None:
+            self.fields["variant_id"].queryset = ProductVariant.objects.filter(
+                tenant=tenant,
+                is_active=True,
+                product__is_active=True,
+            )
+
     def validate_quantity(self, value):
         if value < 1:
             raise serializers.ValidationError("Quantity must be at least 1.")
@@ -71,9 +82,13 @@ class CartItemWriteSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         variant = attrs.get("variant") or getattr(self.instance, "variant", None)
         quantity = attrs.get("quantity", getattr(self.instance, "quantity", 1))
+        tenant = getattr(self.context.get("request"), "tenant", None)
 
         if variant is None:
             raise serializers.ValidationError({"variant_id": "Variant is required."})
+
+        if tenant is not None and variant.tenant_id != tenant.id:
+            raise serializers.ValidationError({"variant_id": "This variant does not belong to the active tenant."})
 
         if not variant.is_active:
             raise serializers.ValidationError({"variant_id": "This variant is inactive."})

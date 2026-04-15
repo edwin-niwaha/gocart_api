@@ -7,6 +7,7 @@ from django.db import models
 
 from apps.common.models import TimeStampedModel
 from apps.orders.models import Order
+from apps.tenants.models import Tenant
 
 
 class Payment(TimeStampedModel):
@@ -30,35 +31,13 @@ class Payment(TimeStampedModel):
         UGX = "UGX", "Ugandan Shilling"
         EUR = "EUR", "Euro"
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="payments",
-    )
-    order = models.ForeignKey(
-        Order,
-        on_delete=models.CASCADE,
-        related_name="payments",
-        null=True,
-        blank=True,
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="payments", null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="payments")
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="payments", null=True, blank=True)
     provider = models.CharField(max_length=20, choices=Provider.choices)
-    status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.PENDING,
-        db_index=True,
-    )
-    currency = models.CharField(
-        max_length=10,
-        choices=Currency.choices,
-        default=Currency.UGX,
-    )
-    amount = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal("0.00"))],
-    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    currency = models.CharField(max_length=10, choices=Currency.choices, default=Currency.UGX)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
     phone_number = models.CharField(max_length=20, blank=True)
     external_id = models.CharField(max_length=100, blank=True)
     reference = models.CharField(max_length=100, unique=True, db_index=True, editable=False)
@@ -70,14 +49,16 @@ class Payment(TimeStampedModel):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["reference"]),
-            models.Index(fields=["status"]),
+            models.Index(fields=["tenant", "reference"]),
+            models.Index(fields=["tenant", "status"]),
             models.Index(fields=["created_at"]),
         ]
 
     def save(self, *args, **kwargs):
         if not self.reference:
             self.reference = f"PAY-{uuid4().hex[:16].upper()}"
+        if self.order_id and not self.tenant_id:
+            self.tenant = self.order.tenant
         super().save(*args, **kwargs)
 
     def __str__(self):

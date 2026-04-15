@@ -2,6 +2,8 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.tenants.permissions import IsTenantManager, is_platform_admin
+from apps.tenants.utils import user_is_tenant_staff
 from .models import Shipment, ShippingMethod
 from .serializers import (
     ShipmentReadSerializer,
@@ -19,7 +21,7 @@ from .services import (
 
 class IsShipmentOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        return bool(request.user and (request.user.is_staff or obj.order.user == request.user))
+        return bool(request.user and (user_is_tenant_staff(request.user, getattr(request, "tenant", None)) or obj.order.user == request.user))
 
 
 class ShippingMethodViewSet(viewsets.ModelViewSet):
@@ -33,7 +35,7 @@ class ShippingMethodViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:
             return [permissions.AllowAny()]
-        return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated(), IsTenantManager()]
 
 
 class ShipmentViewSet(viewsets.ModelViewSet):
@@ -46,7 +48,7 @@ class ShipmentViewSet(viewsets.ModelViewSet):
             "address",
             "shipping_method",
         ).order_by("-created_at")
-        if self.request.user.is_staff:
+        if user_is_tenant_staff(self.request.user, getattr(self.request, "tenant", None)):
             return queryset
         return queryset.filter(order__user=self.request.user)
 
@@ -68,7 +70,7 @@ class ShipmentViewSet(viewsets.ModelViewSet):
         output = ShipmentReadSerializer(shipment, context=self.get_serializer_context())
         return Response(output.data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsTenantManager])
     def mark_shipped(self, request, pk=None):
         shipment = mark_shipment_shipped(
             shipment=self.get_object(),
@@ -76,12 +78,12 @@ class ShipmentViewSet(viewsets.ModelViewSet):
         )
         return Response(ShipmentReadSerializer(shipment).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsTenantManager])
     def mark_in_transit(self, request, pk=None):
         shipment = mark_shipment_in_transit(shipment=self.get_object())
         return Response(ShipmentReadSerializer(shipment).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated, IsTenantManager])
     def mark_delivered(self, request, pk=None):
         shipment = mark_shipment_delivered(shipment=self.get_object())
         return Response(ShipmentReadSerializer(shipment).data, status=status.HTTP_200_OK)

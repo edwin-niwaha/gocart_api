@@ -6,12 +6,14 @@ from .models import Notification
 def create_notification(
     *,
     user,
+    tenant,
     notification_type: str,
     title: str,
     message: str,
     data: dict | None = None,
 ) -> Notification:
     return Notification.objects.create(
+        tenant=tenant,
         user=user,
         notification_type=notification_type,
         title=title,
@@ -28,9 +30,9 @@ def mark_notification_read(*, notification: Notification) -> Notification:
     return notification
 
 
-def mark_all_notifications_read(*, user) -> int:
+def mark_all_notifications_read(*, user, tenant) -> int:
     now = timezone.now()
-    updated = Notification.objects.filter(user=user, is_read=False).update(
+    updated = Notification.objects.filter(user=user, tenant=tenant, is_read=False).update(
         is_read=True,
         read_at=now,
         updated_at=now,
@@ -41,6 +43,7 @@ def mark_all_notifications_read(*, user) -> int:
 def send_order_notification(*, user, order, title: str, message: str) -> Notification:
     return create_notification(
         user=user,
+        tenant=order.tenant,
         notification_type=Notification.NotificationType.ORDER,
         title=title,
         message=message,
@@ -51,6 +54,7 @@ def send_order_notification(*, user, order, title: str, message: str) -> Notific
 def send_payment_notification(*, user, payment, title: str, message: str) -> Notification:
     return create_notification(
         user=user,
+        tenant=payment.order.tenant,
         notification_type=Notification.NotificationType.PAYMENT,
         title=title,
         message=message,
@@ -65,6 +69,7 @@ def send_payment_notification(*, user, payment, title: str, message: str) -> Not
 def send_shipping_notification(*, user, shipment, title: str, message: str) -> Notification:
     return create_notification(
         user=user,
+        tenant=shipment.order.tenant,
         notification_type=Notification.NotificationType.SHIPPING,
         title=title,
         message=message,
@@ -79,6 +84,7 @@ def send_shipping_notification(*, user, shipment, title: str, message: str) -> N
 def send_promotion_notification(*, user, coupon, title: str, message: str) -> Notification:
     return create_notification(
         user=user,
+        tenant=coupon.tenant,
         notification_type=Notification.NotificationType.PROMOTION,
         title=title,
         message=message,

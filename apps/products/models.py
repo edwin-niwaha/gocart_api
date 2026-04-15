@@ -2,12 +2,21 @@ from decimal import Decimal
 
 from django.core.validators import MinValueValidator
 from django.db import models
+
 from apps.common.models import TimeStampedModel
+from apps.tenants.models import Tenant
 
 
 class Category(TimeStampedModel):
-    name = models.CharField(max_length=255, unique=True, db_index=True)
-    slug = models.SlugField(max_length=255, unique=True, db_index=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="categories",
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=255, db_index=True)
+    slug = models.SlugField(max_length=255, db_index=True)
     image_url = models.URLField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
 
@@ -15,17 +24,22 @@ class Category(TimeStampedModel):
         ordering = ["name"]
         verbose_name = "Category"
         verbose_name_plural = "Categories"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "name"], name="unique_category_name_per_tenant"),
+            models.UniqueConstraint(fields=["tenant", "slug"], name="unique_category_slug_per_tenant"),
+        ]
         indexes = [
-            models.Index(fields=["name"]),
-            models.Index(fields=["slug"]),
-            models.Index(fields=["is_active"]),
+            models.Index(fields=["tenant", "name"]),
+            models.Index(fields=["tenant", "slug"]),
+            models.Index(fields=["tenant", "is_active"]),
         ]
 
     def __str__(self) -> str:
-        return self.name
+        return f"{self.tenant.slug}: {self.name}" if self.tenant else self.name
 
 
 class Product(TimeStampedModel):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="products", null=True, blank=True)
     category = models.ForeignKey(
         Category,
         on_delete=models.CASCADE,
@@ -33,8 +47,8 @@ class Product(TimeStampedModel):
         db_index=True,
     )
 
-    title = models.CharField(max_length=255, unique=True, db_index=True)
-    slug = models.SlugField(max_length=255, unique=True, db_index=True)
+    title = models.CharField(max_length=255, db_index=True)
+    slug = models.SlugField(max_length=255, db_index=True)
 
     description = models.TextField(blank=True)
     hero_image = models.URLField(blank=True, null=True)
@@ -47,15 +61,18 @@ class Product(TimeStampedModel):
         ordering = ["-created_at"]
         verbose_name = "Product"
         verbose_name_plural = "Products"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "title"], name="unique_product_title_per_tenant"),
+            models.UniqueConstraint(fields=["tenant", "slug"], name="unique_product_slug_per_tenant"),
+        ]
         indexes = [
-            models.Index(fields=["title"]),
-            models.Index(fields=["slug"]),
-            models.Index(fields=["category"]),
-            models.Index(fields=["is_active"]),
-            models.Index(fields=["is_featured"]),
+            models.Index(fields=["tenant", "title"]),
+            models.Index(fields=["tenant", "slug"]),
+            models.Index(fields=["tenant", "category"]),
+            models.Index(fields=["tenant", "is_active"]),
+            models.Index(fields=["tenant", "is_featured", "is_active"]),
             models.Index(fields=["created_at"]),
             models.Index(fields=["category", "is_active"]),
-            models.Index(fields=["is_featured", "is_active"]),
         ]
 
     def __str__(self) -> str:
@@ -72,6 +89,7 @@ class Product(TimeStampedModel):
 
 
 class ProductVariant(TimeStampedModel):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_variants", null=True, blank=True)
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
@@ -80,7 +98,7 @@ class ProductVariant(TimeStampedModel):
     )
 
     name = models.CharField(max_length=100)
-    sku = models.CharField(max_length=100, unique=True, db_index=True)
+    sku = models.CharField(max_length=100, db_index=True)
 
     price = models.DecimalField(
         max_digits=12,
@@ -97,16 +115,17 @@ class ProductVariant(TimeStampedModel):
 
     class Meta:
         ordering = ["sort_order", "price", "id"]
-        unique_together = ("product", "name")
+        constraints = [
+            models.UniqueConstraint(fields=["product", "name"], name="unique_variant_name_per_product"),
+            models.UniqueConstraint(fields=["tenant", "sku"], name="unique_variant_sku_per_tenant"),
+        ]
         indexes = [
-            models.Index(fields=["product"]),
-            models.Index(fields=["sku"]),
-            models.Index(fields=["price"]),
-            models.Index(fields=["stock_quantity"]),
-            models.Index(fields=["is_active"]),
+            models.Index(fields=["tenant", "product"]),
+            models.Index(fields=["tenant", "sku"]),
+            models.Index(fields=["tenant", "price"]),
+            models.Index(fields=["tenant", "stock_quantity"]),
+            models.Index(fields=["tenant", "is_active"]),
             models.Index(fields=["product", "is_active"]),
-            models.Index(fields=["product", "price"]),
-            models.Index(fields=["product", "stock_quantity"]),
         ]
 
     def __str__(self) -> str:
@@ -115,3 +134,8 @@ class ProductVariant(TimeStampedModel):
     @property
     def is_in_stock(self) -> bool:
         return self.stock_quantity > 0
+
+    def save(self, *args, **kwargs):
+        if self.product_id and not self.tenant_id:
+            self.tenant = self.product.tenant
+        super().save(*args, **kwargs)

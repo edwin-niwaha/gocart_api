@@ -29,6 +29,12 @@ class WishlistItemWriteSerializer(serializers.ModelSerializer):
         model = WishlistItem
         fields = ("product_id",)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        if tenant is not None:
+            self.fields["product_id"].queryset = Product.objects.filter(tenant=tenant, is_active=True)
+
 
 class WishlistReadSerializer(serializers.ModelSerializer):
     items = WishlistItemReadSerializer(many=True, read_only=True)

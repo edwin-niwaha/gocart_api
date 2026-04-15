@@ -1,9 +1,10 @@
+from apps.tenants.admin_mixins import TenantScopedAdminMixin
 from django.contrib import admin
 from .models import ShippingMethod, Shipment
 
 
 @admin.register(ShippingMethod)
-class ShippingMethodAdmin(admin.ModelAdmin):
+class ShippingMethodAdmin(TenantScopedAdminMixin):
     list_display = (
         "name",
         "fee",
@@ -44,7 +45,7 @@ class ShippingMethodAdmin(admin.ModelAdmin):
 
 
 @admin.register(Shipment)
-class ShipmentAdmin(admin.ModelAdmin):
+class ShipmentAdmin(TenantScopedAdminMixin):
     list_display = (
         "order",
         "shipping_method",

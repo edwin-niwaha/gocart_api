@@ -2,6 +2,8 @@ from django.contrib.auth import authenticate, get_user_model, password_validatio
 from django.db import transaction
 from rest_framework import serializers
 
+from apps.tenants.serializers import TenantMembershipSerializer
+
 User = get_user_model()
 
 
@@ -11,6 +13,8 @@ def normalize_email(value: str) -> str:
 
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
+    tenant_memberships = TenantMembershipSerializer(many=True, read_only=True)
+    active_tenant_slug = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -24,6 +28,8 @@ class UserSerializer(serializers.ModelSerializer):
             "user_type",
             "is_active",
             "is_email_verified",
+            "active_tenant_slug",
+            "tenant_memberships",
             "created_at",
         )
         read_only_fields = (
@@ -32,9 +38,17 @@ class UserSerializer(serializers.ModelSerializer):
             "user_type",
             "is_active",
             "is_email_verified",
+            "active_tenant_slug",
+            "tenant_memberships",
             "created_at",
             "avatar_url",
+            "active_tenant_slug",
+            "tenant_memberships",
         )
+
+    def get_active_tenant_slug(self, obj):
+        tenant = getattr(obj, "active_tenant", None)
+        return tenant.slug if tenant else None
 
     def get_avatar_url(self, obj):
         if not obj.avatar:

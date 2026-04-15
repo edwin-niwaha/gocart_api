@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 
 from apps.common.models import TimeStampedModel
-
+from apps.tenants.models import Tenant
 
 
 class Notification(TimeStampedModel):
@@ -13,6 +13,7 @@ class Notification(TimeStampedModel):
         PROMOTION = "PROMOTION", "Promotion"
         SYSTEM = "SYSTEM", "System"
 
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="notifications", null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -28,13 +29,12 @@ class Notification(TimeStampedModel):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["is_read"]),
-            models.Index(fields=["created_at"]),
+            models.Index(fields=["tenant", "is_read"]),
+            models.Index(fields=["tenant", "created_at"]),
         ]
 
     def __str__(self):
         return f"{self.user.email} - {self.title}"
-
 
 
 class DeviceToken(TimeStampedModel):
@@ -42,6 +42,7 @@ class DeviceToken(TimeStampedModel):
         ANDROID = "android", "Android"
         IOS = "ios", "iOS"
 
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="device_tokens", null=True, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -56,8 +57,8 @@ class DeviceToken(TimeStampedModel):
 
     class Meta:
         indexes = [
-            models.Index(fields=["user", "is_active"]),
-            models.Index(fields=["platform", "is_active"]),
+            models.Index(fields=["tenant", "user", "is_active"]),
+            models.Index(fields=["tenant", "platform", "is_active"]),
         ]
 
     def __str__(self) -> str:

@@ -1,6 +1,7 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.response import Response
 
+from apps.tenants.permissions import is_platform_admin
 from .models import Cart, CartItem
 from .serializers import (
     CartItemReadSerializer,
@@ -13,7 +14,7 @@ from .services import add_item_to_cart, get_or_create_cart, remove_cart_item, up
 
 class IsCartOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        if request.user and request.user.is_staff:
+        if is_platform_admin(request.user):
             return True
 
         owner = getattr(obj, "user", None)
@@ -31,15 +32,16 @@ class CartViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsCartOwner]
 
     def get_queryset(self):
+        tenant = self.request.tenant
         queryset = Cart.objects.select_related("user").prefetch_related(
             "items",
             "items__variant",
             "items__variant__product",
             "items__variant__product__category",
         )
-        if self.request.user.is_staff:
+        if is_platform_admin(self.request.user):
             return queryset
-        return queryset.filter(user=self.request.user)
+        return queryset.filter(user=self.request.user, items__variant__tenant=tenant).distinct()
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -56,14 +58,15 @@ class CartItemViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsCartOwner]
 
     def get_queryset(self):
+        tenant = self.request.tenant
         queryset = CartItem.objects.select_related(
             "cart",
             "cart__user",
             "variant",
             "variant__product",
             "variant__product__category",
-        )
-        if self.request.user.is_staff:
+        ).filter(variant__tenant=tenant)
+        if is_platform_admin(self.request.user):
             return queryset
         return queryset.filter(cart__user=self.request.user)
 
@@ -80,6 +83,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
             user=request.user,
             variant=serializer.validated_data["variant"],
             quantity=serializer.validated_data["quantity"],
+            tenant=request.tenant,
         )
 
         output = CartItemReadSerializer(item, context=self.get_serializer_context())
@@ -92,7 +96,7 @@ class CartItemViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         quantity = serializer.validated_data.get("quantity", instance.quantity)
-        item = update_cart_item(item=instance, quantity=quantity)
+        item = update_cart_item(item=instance, quantity=quantity, tenant=request.tenant)
 
         output = CartItemReadSerializer(item, context=self.get_serializer_context())
         return Response(output.data, status=status.HTTP_200_OK)

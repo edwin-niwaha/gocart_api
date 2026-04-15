@@ -1,16 +1,13 @@
 from pathlib import Path
 from datetime import timedelta
+import logging
 import os
 import sys
 
 import dj_database_url
 from dotenv import load_dotenv
 
-# ------------------------------------------------------------------------------
-# PATHS / ENV
-# ------------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parents[2]
-
 load_dotenv()
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
@@ -25,9 +22,6 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-# ------------------------------------------------------------------------------
-# CORE SETTINGS
-# ------------------------------------------------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY environment variable is not set")
@@ -44,9 +38,11 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 
 SITE_ID = int(os.getenv("SITE_ID", 1))
 
-# ------------------------------------------------------------------------------
-# APPLICATIONS
-# ------------------------------------------------------------------------------
+ENABLE_EMAIL = env_bool("ENABLE_EMAIL", True)
+ENABLE_FIREBASE = env_bool("ENABLE_FIREBASE", False)
+ENABLE_MOMO = env_bool("ENABLE_MOMO", False)
+ENABLE_CLOUDINARY = env_bool("ENABLE_CLOUDINARY", False)
+
 DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -71,11 +67,13 @@ THIRD_PARTY_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "social_django",
-    "cloudinary",
-    "cloudinary_storage",
 ]
 
+if ENABLE_CLOUDINARY:
+    THIRD_PARTY_APPS += ["cloudinary", "cloudinary_storage"]
+
 LOCAL_APPS = [
+    "apps.tenants",
     "apps.users",
     "apps.products",
     "apps.cart",
@@ -92,9 +90,6 @@ LOCAL_APPS = [
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
-# ------------------------------------------------------------------------------
-# MIDDLEWARE
-# ------------------------------------------------------------------------------
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -103,22 +98,17 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.tenants.middleware.TenantMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "social_django.middleware.SocialAuthExceptionMiddleware",
 ]
 
-# ------------------------------------------------------------------------------
-# URLS / WSGI / ASGI
-# ------------------------------------------------------------------------------
 ROOT_URLCONF = "core.urls"
 WSGI_APPLICATION = "core.wsgi.application"
 ASGI_APPLICATION = "core.asgi.application"
 
-# ------------------------------------------------------------------------------
-# TEMPLATES
-# ------------------------------------------------------------------------------
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -137,11 +127,7 @@ TEMPLATES = [
     },
 ]
 
-# ------------------------------------------------------------------------------
-# DATABASE
-# ------------------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
-
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
@@ -150,9 +136,6 @@ DATABASES = {
     )
 }
 
-# ------------------------------------------------------------------------------
-# AUTH
-# ------------------------------------------------------------------------------
 AUTH_USER_MODEL = "users.CustomUser"
 
 AUTHENTICATION_BACKENDS = (
@@ -167,17 +150,13 @@ LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 SOCIAL_AUTH_URL_NAMESPACE = "social"
 
-# ------------------------------------------------------------------------------
-# DJANGO-ALLAUTH
-# ------------------------------------------------------------------------------
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*", "password2*"]
-ACCOUNT_EMAIL_VERIFICATION = "none"
+ACCOUNT_EMAIL_VERIFICATION = os.getenv("ACCOUNT_EMAIL_VERIFICATION", "none")
 ACCOUNT_UNIQUE_EMAIL = True
 
 SOCIALACCOUNT_LOGIN_ON_GET = False
 SOCIALACCOUNT_AUTO_SIGNUP = True
-
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
         "APP": {
@@ -185,11 +164,7 @@ SOCIALACCOUNT_PROVIDERS = {
             "secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
             "key": "",
         },
-        "SCOPE": [
-            "openid",
-            "profile",
-            "email",
-        ],
+        "SCOPE": ["openid", "profile", "email"],
         "AUTH_PARAMS": {
             "access_type": "online",
             "prompt": "select_account",
@@ -197,24 +172,11 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 
-# ------------------------------------------------------------------------------
-# SOCIAL DJANGO
-# ------------------------------------------------------------------------------
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.getenv("GOOGLE_KEY")
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.getenv("GOOGLE_SECRET")
 SOCIAL_AUTH_GOOGLE_OAUTH2_SCOPE = ["openid", "email", "profile"]
 SOCIAL_AUTH_GOOGLE_OAUTH2_EXTRA_DATA = ["first_name", "last_name"]
 
-
-# For django only
-# SOCIAL_AUTH_GOOGLE_OAUTH2_REDIRECT_URI = (
-#     "http://localhost:8000/oauth/complete/google-oauth2/"
-# )
-
-
-# ------------------------------------------------------------------------------
-# PASSWORD VALIDATORS
-# ------------------------------------------------------------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -222,53 +184,42 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-# ------------------------------------------------------------------------------
-# INTERNATIONALIZATION
-# ------------------------------------------------------------------------------
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.getenv("TIME_ZONE", "UTC")
 USE_I18N = True
 USE_TZ = True
 
-# ------------------------------------------------------------------------------
-# STATIC / MEDIA
-# ------------------------------------------------------------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# ------------------------------------------------------------------------------
-# DEFAULT PRIMARY KEY
-# ------------------------------------------------------------------------------
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ------------------------------------------------------------------------------
-# DJANGO REST FRAMEWORK
-# ------------------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.AllowAny",
+        "rest_framework.permissions.IsAuthenticatedOrReadOnly",
     ),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": int(os.getenv("PAGE_SIZE", 10)),
-
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ),
     "DEFAULT_THROTTLE_RATES": {
-        "auth_anon": "10/min",
-        "auth_user": "20/min",
-    }
+        "anon": os.getenv("THROTTLE_ANON_RATE", "60/min"),
+        "user": os.getenv("THROTTLE_USER_RATE", "120/min"),
+        "auth_anon": os.getenv("THROTTLE_AUTH_ANON_RATE", "10/min"),
+        "auth_user": os.getenv("THROTTLE_AUTH_USER_RATE", "20/min"),
+    },
 }
 
-# ------------------------------------------------------------------------------
-# SIMPLE JWT
-# ------------------------------------------------------------------------------
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_MINUTES", 60))),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_DAYS", 7))),
@@ -280,9 +231,6 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-# ------------------------------------------------------------------------------
-# DJ REST AUTH
-# ------------------------------------------------------------------------------
 REST_AUTH = {
     "USE_JWT": True,
     "JWT_AUTH_COOKIE": os.getenv("JWT_AUTH_COOKIE", "access_token"),
@@ -290,100 +238,111 @@ REST_AUTH = {
     "JWT_AUTH_HTTPONLY": True,
 }
 
-# ------------------------------------------------------------------------------
-# CORS / CSRF
-# ------------------------------------------------------------------------------
 CORS_ALLOW_CREDENTIALS = True
 
-
-# ------------------------------------------------------------------------------
-# LOGGING
-# ------------------------------------------------------------------------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG" if DEBUG else "INFO")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "standard": {
-            "format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+        "standard": {"format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s"},
+        "verbose": {
+            "format": "[%(asctime)s] %(levelname)s %(name)s %(process)d %(thread)d: %(message)s"
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "stream": sys.stdout,
-            "formatter": "standard",
+            "formatter": "verbose" if not DEBUG else "standard",
         },
     },
     "root": {
         "handlers": ["console"],
-        "level": "DEBUG" if DEBUG else "INFO",
+        "level": LOG_LEVEL,
     },
 }
 
-# ------------------------------------------------------------------------------
-# SECURITY DEFAULTS
-# ------------------------------------------------------------------------------
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
-
-# Email settings
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
-    "django.core.mail.backends.smtp.EmailBackend",
+    "django.core.mail.backends.smtp.EmailBackend" if ENABLE_EMAIL else "django.core.mail.backends.console.EmailBackend",
 )
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_USE_TLS = True
-EMAIL_PORT = 587
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
-SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", EMAIL_HOST_USER)
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "noreply@gocart.local")
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", EMAIL_HOST_USER or DEFAULT_FROM_EMAIL)
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = "Africa/Kampala"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+CELERY_TASK_EAGER_PROPAGATES = env_bool("CELERY_TASK_EAGER_PROPAGATES", False)
 
-# MTN Mobile Money settings
 SUBSCRIPTION_KEY = os.getenv("SUBSCRIPTION_KEY")
 MOMO_API_USER = os.getenv("MOMO_API_USER")
 MOMO_API_KEY = os.getenv("MOMO_API_KEY")
-MOMO_CALLBACK_URL = os.environ["MOMO_CALLBACK_URL"]
-MOMO_BASE_URL = os.environ["MOMO_BASE_URL"]
-MOMO_TARGET_ENVIRONMENT = os.environ["MOMO_TARGET_ENVIRONMENT"]
+MOMO_CALLBACK_URL = os.getenv("MOMO_CALLBACK_URL", "")
+MOMO_BASE_URL = os.getenv("MOMO_BASE_URL", "")
+MOMO_TARGET_ENVIRONMENT = os.getenv("MOMO_TARGET_ENVIRONMENT", "sandbox")
 MOMO_CURRENCY = os.getenv("MOMO_CURRENCY", "UGX")
 
-
-# Cloudinary storage configuration
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
-CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": CLOUDINARY_CLOUD_NAME,
-    "API_KEY": CLOUDINARY_API_KEY,
-    "API_SECRET": CLOUDINARY_API_SECRET,
-}
-
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-
-# Cloudinary media URL online
-MEDIA_URL = f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/"
-
-
+if ENABLE_CLOUDINARY:
+    CLOUDINARY_STORAGE = {
+        "CLOUD_NAME": CLOUDINARY_CLOUD_NAME,
+        "API_KEY": CLOUDINARY_API_KEY,
+        "API_SECRET": CLOUDINARY_API_SECRET,
+    }
+    STORAGES = {
+        "default": {"BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+    if CLOUDINARY_CLOUD_NAME:
+        MEDIA_URL = f"https://res.cloudinary.com/{CLOUDINARY_CLOUD_NAME}/"
+else:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
 
 FIREBASE_SERVICE_ACCOUNT_PATH = os.getenv(
     "FIREBASE_SERVICE_ACCOUNT_PATH",
     str(BASE_DIR / "core" / "firebase" / "service-account.json"),
 )
 
-# 🔥 Add this debug check
-if not Path(FIREBASE_SERVICE_ACCOUNT_PATH).exists():
+if ENABLE_FIREBASE and not Path(FIREBASE_SERVICE_ACCOUNT_PATH).exists():
     raise FileNotFoundError(
         f"Firebase service account not found: {FIREBASE_SERVICE_ACCOUNT_PATH}"
     )
+
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            environment=ENVIRONMENT,
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+            send_default_pii=False,
+        )
+    except Exception:  # pragma: no cover
+        logging.getLogger(__name__).exception("Failed to initialize Sentry")
+
+# Frontend URL for email templates and other references
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")

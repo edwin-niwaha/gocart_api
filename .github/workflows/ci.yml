@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: testsecretkeythirtytwocharsminimum
+      JWT_SECRET_KEY: testsecretkeythirtytwocharsminimum
+      DATABASE_URL: sqlite:///db.sqlite3
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      CSRF_TRUSTED_ORIGINS: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Django deploy checks
+        run: |
+          python manage.py check --settings=core.settings.testing
+      - name: Environment verification
+        run: |
+          python manage.py verify_environment --settings=core.settings.testing
+      - name: Run tests
+        run: |
+          python manage.py test --settings=core.settings.testing -v 2

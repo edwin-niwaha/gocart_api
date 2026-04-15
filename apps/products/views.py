@@ -1,23 +1,18 @@
 from django.db.models import Prefetch
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, permissions, status, viewsets
+from rest_framework import filters, status, viewsets
 from rest_framework.response import Response
 
+from apps.tenants.permissions import IsTenantAdminOrReadOnly
+from apps.tenants.utils import user_is_tenant_staff
 from .models import Category, Product, ProductVariant
 from .serializers import CategorySerializer, ProductSerializer
 from .services import create_category, create_product, update_category, update_product
 
 
-class IsAdminOrReadOnly(permissions.BasePermission):
-    def has_permission(self, request, view):
-        if request.method in permissions.SAFE_METHODS:
-            return True
-        return bool(request.user and request.user.is_staff)
-
-
 class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsTenantAdminOrReadOnly]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["is_active"]
@@ -26,9 +21,10 @@ class CategoryViewSet(viewsets.ModelViewSet):
     ordering = ["name"]
 
     def get_queryset(self):
-        queryset = Category.objects.all().order_by("name")
+        tenant = self.request.tenant
+        queryset = Category.objects.filter(tenant=tenant).order_by("name")
 
-        if self.request.user and self.request.user.is_staff: # type: ignore
+        if user_is_tenant_staff(self.request.user, tenant):
             return queryset
 
         return queryset.filter(is_active=True)
@@ -37,7 +33,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        category = create_category(**serializer.validated_data)
+        category = create_category(tenant=request.tenant, **serializer.validated_data)
         output = self.get_serializer(category)
         return Response(output.data, status=status.HTTP_201_CREATED)
 
@@ -58,7 +54,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsTenantAdminOrReadOnly]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["category", "is_active", "is_featured"]
@@ -75,17 +71,19 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering = ["-created_at"]
 
     def get_queryset(self):
+        tenant = self.request.tenant
         base_queryset = Product.objects.select_related(
+            "tenant",
             "category",
             "product_rating",
-        ).order_by("-created_at")
+        ).filter(tenant=tenant).order_by("-created_at")
 
-        if self.request.user and self.request.user.is_staff: # type: ignore
+        if user_is_tenant_staff(self.request.user, tenant):
             return base_queryset.prefetch_related("variants")
 
         active_variants = Prefetch(
             "variants",
-            queryset=ProductVariant.objects.filter(is_active=True).order_by(
+            queryset=ProductVariant.objects.filter(tenant=tenant, is_active=True).order_by(
                 "sort_order",
                 "price",
                 "id",
@@ -97,6 +95,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             .filter(
                 is_active=True,
                 category__is_active=True,
+                variants__tenant=tenant,
                 variants__is_active=True,
             )
             .distinct()
@@ -106,7 +105,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        product = create_product(**serializer.validated_data)
+        product = create_product(tenant=request.tenant, **serializer.validated_data)
         output = self.get_serializer(product)
         return Response(output.data, status=status.HTTP_201_CREATED)
 

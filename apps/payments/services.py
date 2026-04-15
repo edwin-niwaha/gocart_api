@@ -93,8 +93,10 @@ def request_to_pay(*, phone: str, amount: Decimal, external_id: str | None = Non
     }
 
 
-def get_user_cart_total(user) -> Decimal:
+def get_user_cart_total(user, tenant=None) -> Decimal:
     cart_items = CartItem.objects.select_related("variant").filter(cart__user=user)
+    if tenant is not None:
+        cart_items = cart_items.filter(variant__tenant=tenant)
 
     total = Decimal("0.00")
     for item in cart_items:
@@ -104,14 +106,18 @@ def get_user_cart_total(user) -> Decimal:
     return total
 
 
-def user_has_cart_items(user) -> bool:
-    return CartItem.objects.filter(cart__user=user).exists()
+def user_has_cart_items(user, tenant=None) -> bool:
+    queryset = CartItem.objects.filter(cart__user=user)
+    if tenant is not None:
+        queryset = queryset.filter(variant__tenant=tenant)
+    return queryset.exists()
 
 
-def initiate_mtn_payment(*, user, phone_number: str, address) -> Payment:
-    amount = get_user_cart_total(user)
+def initiate_mtn_payment(*, user, phone_number: str, address, tenant=None) -> Payment:
+    amount = get_user_cart_total(user, tenant)
 
     payment = Payment.objects.create(
+        tenant=tenant,
         user=user,
         order=None,
         provider=Payment.Provider.MTN,

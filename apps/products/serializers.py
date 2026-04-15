@@ -8,6 +8,7 @@ class CategorySerializer(serializers.ModelSerializer):
         model = Category
         fields = (
             "id",
+            "tenant",
             "name",
             "slug",
             "image_url",
@@ -15,17 +16,20 @@ class CategorySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "tenant", "created_at", "updated_at")
+        validators = []
 
 
 class ProductVariantSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
+    sku = serializers.CharField(required=False, allow_blank=True)
     is_in_stock = serializers.ReadOnlyField()
 
     class Meta:
         model = ProductVariant
         fields = (
             "id",
+            "tenant",
             "name",
             "sku",
             "price",
@@ -38,13 +42,17 @@ class ProductVariantSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = (
+            "tenant",
             "created_at",
             "updated_at",
             "is_in_stock",
         )
+        extra_kwargs = {"sku": {"required": False}}
+        validators = []
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    slug = serializers.CharField(required=False, allow_blank=True)
     category = CategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.filter(is_active=True),
@@ -62,6 +70,7 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = (
             "id",
+            "tenant",
             "title",
             "slug",
             "description",
@@ -81,6 +90,7 @@ class ProductSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "tenant",
             "created_at",
             "updated_at",
             "base_price",
@@ -88,6 +98,15 @@ class ProductSerializer(serializers.ModelSerializer):
             "average_rating",
             "total_reviews",
         )
+        extra_kwargs = {"slug": {"required": False}}
+        validators = []
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None)
+        if tenant is not None:
+            self.fields["category_id"].queryset = Category.objects.filter(tenant=tenant, is_active=True)
 
     def get_average_rating(self, obj):
         rating = getattr(obj, "product_rating", None)
@@ -104,6 +123,12 @@ class ProductSerializer(serializers.ModelSerializer):
     def validate_image_urls(self, value):
         if not isinstance(value, list):
             raise serializers.ValidationError("image_urls must be a list.")
+        return value
+
+    def validate_category_id(self, value):
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        if tenant is not None and value.tenant_id != tenant.id:
+            raise serializers.ValidationError("Category must belong to the active tenant.")
         return value
 
     def validate_variants(self, value):

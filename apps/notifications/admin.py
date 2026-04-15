@@ -1,9 +1,10 @@
+from apps.tenants.admin_mixins import TenantScopedAdminMixin
 from django.contrib import admin
 from .models import Notification
 
 
 @admin.register(Notification)
-class NotificationAdmin(admin.ModelAdmin):
+class NotificationAdmin(TenantScopedAdminMixin):
     list_display = (
         "user",
         "notification_type",

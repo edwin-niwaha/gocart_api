@@ -2,6 +2,7 @@ from datetime import timedelta
 import hashlib
 import hmac
 import secrets
+
 from cloudinary.models import CloudinaryField
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
@@ -96,6 +97,15 @@ class CustomUser(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    @property
+    def active_tenant_membership(self):
+        return self.tenant_memberships.select_related("tenant").filter(is_active=True, tenant__is_active=True).first()
+
+    @property
+    def active_tenant(self):
+        membership = self.active_tenant_membership
+        return membership.tenant if membership else None
 
 
 class EmailOTP(models.Model):
