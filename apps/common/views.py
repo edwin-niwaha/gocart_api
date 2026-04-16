@@ -171,3 +171,40 @@ class NewsletterSubscribeViewSet(viewsets.ViewSet):
             {"detail": "Your subscription has been confirmed."},
             status=status.HTTP_200_OK,
         )
+    
+
+    @action(detail=False, methods=["post"], url_path="unsubscribe")
+    def unsubscribe(self, request):
+        serializer = NewsletterSubscribeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+        email = validated_data["email"].strip().lower()
+        tenant = getattr(request, "tenant", None)
+
+        try:
+            subscriber = NewsletterSubscriber.objects.get(
+                email=email,
+                tenant=tenant,
+            )
+        except NewsletterSubscriber.DoesNotExist:
+            return Response(
+                {"detail": "This email is not subscribed."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not subscriber.is_active:
+            return Response(
+                {"detail": "This email is already unsubscribed."},
+                status=status.HTTP_200_OK,
+            )
+
+        subscriber.is_active = False
+        subscriber.is_confirmed = False
+        subscriber.confirmed_at = None
+        subscriber.save(update_fields=["is_active", "is_confirmed", "confirmed_at"])
+
+        return Response(
+            {"detail": "You have successfully unsubscribed."},
+            status=status.HTTP_200_OK,
+        )

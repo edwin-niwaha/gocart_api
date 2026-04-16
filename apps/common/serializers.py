@@ -13,7 +13,11 @@ class ContactMessageSerializer(serializers.Serializer):
 class NewsletterSubscribeSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
+
+class NewsletterUnsubscribeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
     
+        
 class SupportMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = SupportMessage
