@@ -3,10 +3,8 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from apps.addresses.models import CustomerAddress
-from apps.products.models import ProductVariant
+from apps.payments.models import Payment
 from .models import Order, OrderItem, OrderStatusEvent
-
-EDITABLE_ORDER_STATUSES = {Order.Status.PENDING, Order.Status.PROCESSING}
 
 
 class OrderItemReadSerializer(serializers.ModelSerializer):
@@ -48,7 +46,15 @@ class OrderStatusEventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderStatusEvent
-        fields = ("id", "from_status", "to_status", "note", "changed_by", "changed_by_email", "created_at")
+        fields = (
+            "id",
+            "from_status",
+            "to_status",
+            "note",
+            "changed_by",
+            "changed_by_email",
+            "created_at",
+        )
         read_only_fields = fields
 
 
@@ -85,8 +91,20 @@ class OrderReadSerializer(serializers.ModelSerializer):
 
 
 class OrderCheckoutSerializer(serializers.Serializer):
-    address_id = serializers.PrimaryKeyRelatedField(queryset=CustomerAddress.objects.all(), source="address")
+    address_id = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerAddress.objects.all(),
+        source="address",
+    )
     description = serializers.CharField(required=False, allow_blank=True)
+    payment_method = serializers.ChoiceField(
+        choices=[
+            Payment.Provider.CASH,
+            Payment.Provider.MTN,
+            Payment.Provider.AIRTEL,
+        ],
+        required=False,
+        default=Payment.Provider.CASH,
+    )
 
     def validate_address_id(self, value: CustomerAddress) -> CustomerAddress:
         request = self.context["request"]
@@ -101,7 +119,10 @@ class OrderStatusTransitionSerializer(serializers.Serializer):
 
 
 class OrderWriteSerializer(serializers.ModelSerializer):
-    address_id = serializers.PrimaryKeyRelatedField(queryset=CustomerAddress.objects.all(), source="address")
+    address_id = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerAddress.objects.all(),
+        source="address",
+    )
 
     class Meta:
         model = Order
@@ -109,11 +130,16 @@ class OrderWriteSerializer(serializers.ModelSerializer):
 
     def validate_slug(self, value: str) -> str:
         instance = getattr(self, "instance", None)
-        queryset = Order.objects.filter(slug=value, tenant=self.context["request"].tenant)
+        queryset = Order.objects.filter(
+            slug=value,
+            tenant=self.context["request"].tenant,
+        )
         if instance is not None:
             queryset = queryset.exclude(pk=instance.pk)
         if value and queryset.exists():
-            raise serializers.ValidationError("An order with this slug already exists for this tenant.")
+            raise serializers.ValidationError(
+                "An order with this slug already exists for this tenant."
+            )
         return value
 
     def validate_address_id(self, value: CustomerAddress) -> CustomerAddress:
@@ -121,39 +147,3 @@ class OrderWriteSerializer(serializers.ModelSerializer):
         if not request.user.is_staff and value.user != request.user:
             raise serializers.ValidationError("You can only use your own address.")
         return value
-
-
-class OrderItemWriteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = OrderItem
-        fields = ("order", "variant", "quantity")
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        tenant = getattr(self.context.get("request"), "tenant", None)
-        if tenant is not None:
-            self.fields["order"].queryset = Order.objects.filter(tenant=tenant)
-            self.fields["variant"].queryset = ProductVariant.objects.filter(tenant=tenant, is_active=True)
-
-    def validate(self, attrs):
-        request = self.context["request"]
-        order = attrs.get("order", getattr(self.instance, "order", None))
-        variant = attrs.get("variant", getattr(self.instance, "variant", None))
-        quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
-
-        if order is None or variant is None or quantity is None:
-            raise serializers.ValidationError("Order, variant, and quantity are required.")
-        if order.tenant_id != request.tenant.id or variant.tenant_id != request.tenant.id:
-            raise serializers.ValidationError("Order and variant must belong to the active tenant.")
-        if not request.user.is_staff and order.user != request.user:
-            raise serializers.ValidationError("You cannot modify another user's order.")
-        if order.status not in EDITABLE_ORDER_STATUSES:
-            raise serializers.ValidationError(f"Items cannot be modified when order status is {order.get_status_display()}.")
-        if not variant.is_active:
-            raise serializers.ValidationError("Selected variant is not active.")
-        if variant.stock_quantity < quantity:
-            raise serializers.ValidationError("Insufficient stock for this variant.")
-        max_qty = variant.max_quantity_per_order
-        if max_qty is not None and quantity > max_qty:
-            raise serializers.ValidationError(f"You can only order up to {max_qty} of this variant.")
-        return attrs

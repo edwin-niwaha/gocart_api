@@ -1,3 +1,4 @@
+import logging
 import random
 import uuid
 from decimal import Decimal
@@ -6,18 +7,22 @@ import requests
 from django.conf import settings
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-import logging
-logger = logging.getLogger(__name__)
 
 from apps.cart.models import CartItem
 from .models import Payment
+
+logger = logging.getLogger(__name__)
 
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
-def momo_headers(subscription_key: str, token: str | None = None, ref_id: str | None = None):
+def momo_headers(
+    subscription_key: str,
+    token: str | None = None,
+    ref_id: str | None = None,
+):
     headers = {
         "Ocp-Apim-Subscription-Key": subscription_key,
     }
@@ -34,7 +39,10 @@ def momo_headers(subscription_key: str, token: str | None = None, ref_id: str | 
 
 def create_access_token() -> str:
     url = f"{settings.MOMO_BASE_URL}/collection/token/"
-    auth = requests.auth.HTTPBasicAuth(settings.MOMO_API_USER, settings.MOMO_API_KEY)
+    auth = requests.auth.HTTPBasicAuth(
+        settings.MOMO_API_USER,
+        settings.MOMO_API_KEY,
+    )
     headers = {
         "Ocp-Apim-Subscription-Key": settings.SUBSCRIPTION_KEY,
     }
@@ -49,7 +57,12 @@ def create_access_token() -> str:
     return token
 
 
-def request_to_pay(*, phone: str, amount: Decimal, external_id: str | None = None) -> dict:
+def request_to_pay(
+    *,
+    phone: str,
+    amount: Decimal,
+    external_id: str | None = None,
+) -> dict:
     access_token = create_access_token()
     transaction_id = generate_uuid()
 
@@ -95,12 +108,17 @@ def request_to_pay(*, phone: str, amount: Decimal, external_id: str | None = Non
 
 def get_user_cart_total(user, tenant=None) -> Decimal:
     cart_items = CartItem.objects.select_related("variant").filter(cart__user=user)
+
     if tenant is not None:
         cart_items = cart_items.filter(variant__tenant=tenant)
 
     total = Decimal("0.00")
     for item in cart_items:
-        unit_price = item.variant.price if item.variant and item.variant.price else Decimal("0.00")
+        unit_price = (
+            item.variant.price
+            if item.variant and item.variant.price
+            else Decimal("0.00")
+        )
         total += unit_price * item.quantity
 
     return total
@@ -108,18 +126,27 @@ def get_user_cart_total(user, tenant=None) -> Decimal:
 
 def user_has_cart_items(user, tenant=None) -> bool:
     queryset = CartItem.objects.filter(cart__user=user)
+
     if tenant is not None:
         queryset = queryset.filter(variant__tenant=tenant)
+
     return queryset.exists()
 
 
-def initiate_mtn_payment(*, user, phone_number: str, address, tenant=None) -> Payment:
+def initiate_mtn_payment(
+    *,
+    user,
+    order,
+    phone_number: str,
+    address,
+    tenant=None,
+) -> Payment:
     amount = get_user_cart_total(user, tenant)
 
     payment = Payment.objects.create(
         tenant=tenant,
         user=user,
-        order=None,
+        order=order,
         provider=Payment.Provider.MTN,
         amount=amount,
         currency=settings.MOMO_CURRENCY,
@@ -127,6 +154,7 @@ def initiate_mtn_payment(*, user, phone_number: str, address, tenant=None) -> Pa
         status=Payment.Status.PENDING,
         provider_response={
             "address_id": address.id,
+            "order_id": order.id,
         },
     )
 
@@ -143,6 +171,7 @@ def initiate_mtn_payment(*, user, phone_number: str, address, tenant=None) -> Pa
         "initiate": result["data"],
         "initiate_status_code": result["status_code"],
         "address_id": address.id,
+        "order_id": order.id,
     }
 
     if result["status_code"] == 202:
@@ -169,11 +198,13 @@ def initiate_mtn_payment(*, user, phone_number: str, address, tenant=None) -> Pa
         ]
     )
 
-    raise ValidationError({
-        "detail": "MTN payment request was not accepted.",
-        "provider_response": result["data"],
-        "provider_status_code": result["status_code"],
-    })
+    raise ValidationError(
+        {
+            "detail": "MTN payment request was not accepted.",
+            "provider_response": result["data"],
+            "provider_status_code": result["status_code"],
+        }
+    )
 
 
 def check_status(reference_id: str) -> dict:
@@ -225,7 +256,7 @@ def refresh_mtn_payment_status(payment: Payment) -> Payment:
         )
         return payment
 
-    if http_status >= 400: # type: ignore
+    if http_status >= 400:
         payment.provider_response = {
             **payment.provider_response,
             "status_check": data,
