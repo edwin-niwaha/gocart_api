@@ -50,5 +50,6 @@ urlpatterns = [
     path("rest-auth/", include("dj_rest_auth.urls")),
     path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
     path("payments/", include("apps.payments.urls")),
+    path("admin/payments/", include("apps.payments.admin_urls")),
     path("", include(router.urls)),
 ]

@@ -155,3 +155,77 @@ class PaymentListSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+
+class AdminPaymentSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
+    order_slug = serializers.CharField(source="order.slug", read_only=True)
+    order_status = serializers.CharField(source="order.status", read_only=True)
+    tenant_name = serializers.CharField(source="tenant.name", read_only=True)
+    tenant_slug = serializers.CharField(source="tenant.slug", read_only=True)
+    address_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payment
+        fields = [
+            "id",
+            "reference",
+            "user",
+            "user_email",
+            "username",
+            "tenant",
+            "tenant_name",
+            "tenant_slug",
+            "order",
+            "order_slug",
+            "order_status",
+            "provider",
+            "status",
+            "amount",
+            "currency",
+            "phone_number",
+            "external_id",
+            "transaction_id",
+            "provider_response",
+            "address_id",
+            "created_at",
+            "updated_at",
+            "paid_at",
+        ]
+        read_only_fields = [
+            "reference",
+            "user",
+            "user_email",
+            "username",
+            "tenant",
+            "tenant_name",
+            "tenant_slug",
+            "order",
+            "order_slug",
+            "order_status",
+            "amount",
+            "currency",
+            "phone_number",
+            "external_id",
+            "address_id",
+            "created_at",
+            "updated_at",
+            "paid_at",
+        ]
+
+    def get_address_id(self, obj):
+        return obj.provider_response.get("address_id") if obj.provider_response else None
+
+    def validate_provider(self, value):
+        allowed = {choice[0] for choice in Payment.Provider.choices}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid payment provider.")
+        return value
+
+    def validate_status(self, value):
+        allowed = {choice[0] for choice in Payment.Status.choices}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid payment status.")
+        return value
