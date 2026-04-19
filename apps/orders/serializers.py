@@ -99,6 +99,9 @@ class OrderCheckoutSerializer(serializers.Serializer):
     payment_method = serializers.ChoiceField(
         choices=[
             Payment.Provider.CASH,
+            Payment.Provider.STRIPE,
+            Payment.Provider.PAYSTACK,
+            Payment.Provider.FLUTTERWAVE,
             Payment.Provider.MTN,
             Payment.Provider.AIRTEL,
         ],
@@ -126,24 +129,9 @@ class OrderWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = ("slug", "description", "address_id")
-
-    def validate_slug(self, value: str) -> str:
-        instance = getattr(self, "instance", None)
-        queryset = Order.objects.filter(
-            slug=value,
-            tenant=self.context["request"].tenant,
+        fields = (
+            "slug",
+            "status",
+            "description",
+            "address_id",
         )
-        if instance is not None:
-            queryset = queryset.exclude(pk=instance.pk)
-        if value and queryset.exists():
-            raise serializers.ValidationError(
-                "An order with this slug already exists for this tenant."
-            )
-        return value
-
-    def validate_address_id(self, value: CustomerAddress) -> CustomerAddress:
-        request = self.context["request"]
-        if not request.user.is_staff and value.user != request.user:
-            raise serializers.ValidationError("You can only use your own address.")
-        return value

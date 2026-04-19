@@ -146,7 +146,7 @@ def initiate_mtn_payment(
     payment = Payment.objects.create(
         tenant=tenant,
         user=user,
-        order=order,
+        order=None,
         provider=Payment.Provider.MTN,
         amount=amount,
         currency=settings.MOMO_CURRENCY,
@@ -154,7 +154,6 @@ def initiate_mtn_payment(
         status=Payment.Status.PENDING,
         provider_response={
             "address_id": address.id,
-            "order_id": order.id,
         },
     )
 
@@ -171,7 +170,6 @@ def initiate_mtn_payment(
         "initiate": result["data"],
         "initiate_status_code": result["status_code"],
         "address_id": address.id,
-        "order_id": order.id,
     }
 
     if result["status_code"] == 202:
@@ -205,8 +203,6 @@ def initiate_mtn_payment(
             "provider_status_code": result["status_code"],
         }
     )
-
-
 def check_status(reference_id: str) -> dict:
     access_token = create_access_token()
     url = f"{settings.MOMO_BASE_URL}/collection/v1_0/requesttopay/{reference_id}"

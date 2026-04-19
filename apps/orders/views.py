@@ -50,7 +50,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     ordering_fields = ["created_at", "total_price", "status"]
 
     def get_queryset(self):
-        tenant = self.request.tenant # type: ignore
+        tenant = self.request.tenant  # type: ignore
         queryset = (
             Order.objects.select_related("tenant", "user", "address")
             .prefetch_related(
@@ -137,21 +137,31 @@ class OrderViewSet(viewsets.ModelViewSet):
 
             order.recalculate_total_price()
 
-            payment = None
-            if payment_method == Payment.Provider.CASH:
-                payment = Payment.objects.create(
-                    tenant=tenant,
-                    user=request.user,
-                    order=order,
-                    provider=Payment.Provider.CASH,
-                    amount=order.total_price,
-                    currency=Payment.Currency.UGX,
-                    status=Payment.Status.PENDING,
-                    provider_response={
-                        "payment_method": Payment.Provider.CASH,
-                        "payment_note": "Pay on delivery selected at checkout",
-                    },
-                )
+            payment_status = (
+                Payment.Status.PENDING
+                if payment_method == Payment.Provider.CASH
+                else Payment.Status.PROCESSING
+            )
+
+            payment_note = (
+                "Pay on delivery selected at checkout"
+                if payment_method == Payment.Provider.CASH
+                else f"{payment_method} selected at checkout"
+            )
+
+            payment = Payment.objects.create(
+                tenant=tenant,
+                user=request.user,
+                order=order,
+                provider=payment_method,
+                amount=order.total_price,
+                currency=Payment.Currency.UGX,
+                status=payment_status,
+                provider_response={
+                    "payment_method": payment_method,
+                    "payment_note": payment_note,
+                },
+            )
 
             CartItem.objects.filter(id__in=[item.id for item in cart_items]).delete()
             queue_order_created_notifications(order.id)
@@ -160,39 +170,29 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "order": output.data,
-                "payment_reference": payment.reference if payment else None,
-                "payment_status": payment.status if payment else None,
-                "payment_provider": payment.provider if payment else payment_method,
+                "payment_reference": payment.reference,
+                "payment_status": payment.status,
+                "payment_provider": payment.provider,
             },
             status=status.HTTP_201_CREATED,
         )
 
     @action(detail=True, methods=["post"], url_path="transition-status")
-    def transition_status(self, request, slug=None):
+    def transition_status(self, request, slug=None, *args, **kwargs):
         order = self.get_object()
-
-        if not user_is_tenant_staff(request.user, request.tenant):
-            return Response(
-                {"detail": "Only tenant staff can change order status."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        order = transition_order_status(
+        updated = transition_order_status(
             order=order,
             new_status=serializer.validated_data["status"],
             changed_by=request.user,
             note=serializer.validated_data.get("note", ""),
         )
-        output = OrderReadSerializer(order, context=self.get_serializer_context())
-        return Response(output.data, status=status.HTTP_200_OK)
 
-    def create(self, request, *args, **kwargs):
         return Response(
-            {"detail": "Use the checkout endpoint."},
-            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+            OrderReadSerializer(updated, context=self.get_serializer_context()).data,
+            status=status.HTTP_200_OK,
         )
 
 
@@ -202,25 +202,19 @@ class OrderItemViewSet(
     viewsets.GenericViewSet,
 ):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrOwner]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["order", "variant"]
+    serializer_class = OrderItemReadSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["order", "product", "variant"]
+    search_fields = ["product_title", "variant_name", "variant_sku", "order__slug"]
     ordering_fields = ["created_at", "quantity", "unit_price"]
 
     def get_queryset(self):
-        tenant = self.request.tenant
+        tenant = self.request.tenant  # type: ignore
         queryset = (
-            OrderItem.objects.select_related(
-                "tenant",
-                "order",
-                "order__user",
-                "product",
-                "variant",
-            ).filter(tenant=tenant)
+            OrderItem.objects.select_related("tenant", "order", "product", "variant")
+            .filter(tenant=tenant)
         )
 
         if user_is_tenant_staff(self.request.user, tenant):
             return queryset
         return queryset.filter(order__user=self.request.user)
-
-    def get_serializer_class(self):
-        return OrderItemReadSerializer

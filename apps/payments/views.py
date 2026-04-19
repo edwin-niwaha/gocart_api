@@ -55,17 +55,7 @@ class MTNInitiatePaymentView(APIView):
 
         address = serializer.context["address_instance"]
         phone_number = serializer.validated_data["phone_number"]
-        existing_order = serializer.context.get("order_instance")
-
-        if existing_order is not None:
-            order = existing_order
-        else:
-            order = create_order(
-                user=request.user,
-                tenant=request.tenant,
-                address=address,
-                description="Pending mobile money payment",
-            )
+        order = None  # DO NOT create order yet
 
         payment = initiate_mtn_payment(
             user=request.user,
@@ -82,7 +72,6 @@ class MTNInitiatePaymentView(APIView):
                 "status": payment.status,
                 "amount": payment.amount,
                 "currency": payment.currency,
-                "order_id": order.id,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -178,15 +167,16 @@ class FinalizePaidOrderView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            order = payment.order
-            if order is None:
-                order = create_order(
-                    user=request.user,
-                    tenant=request.tenant,
-                    address=address,
-                    description="Placed after successful mobile money payment",
-                )
-                payment.order = order
+            # ALWAYS create order here after successful payment
+            order = create_order(
+                user=request.user,
+                tenant=request.tenant,
+                address=address,
+                description="Placed after successful mobile money payment",
+                status=Order.Status.PAID,
+            )
+
+            payment.order = order
 
             cart_items = _get_cart_items_for_user(request.user, request.tenant)
             if not cart_items:
@@ -229,7 +219,8 @@ class FinalizePaidOrderView(APIView):
             CartItem.objects.filter(id__in=[item.id for item in cart_items]).delete()
 
             payment.tenant = request.tenant
-            payment.save(update_fields=["order", "tenant", "updated_at"])
+            payment.amount = order.total_price
+            payment.save(update_fields=["order", "amount", "tenant", "updated_at"])
 
             output = OrderReadSerializer(order, context={"request": request})
             return Response(
