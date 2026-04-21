@@ -28,21 +28,21 @@ class OrderTenantCheckoutTests(TestCase):
         self.address = CustomerAddress.objects.create(user=self.user, street_name="Plot 1", city="Kampala", region=CustomerAddress.Region.KAMPALA_AREA)
         self.cart = Cart.objects.create(user=self.user)
 
-    def test_checkout_uses_active_tenant_items_only(self):
-        CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
-        CartItem.objects.create(cart=self.cart, variant=self.variant_b, quantity=1, unit_price="2000.00")
+        def test_checkout_uses_active_tenant_items_only(self):
+            CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
+            CartItem.objects.create(cart=self.cart, variant=self.variant_b, quantity=1, unit_price="2000.00")
 
-        response = self.client.post(
-            "/api/v1/orders/checkout/",
-            {"address_id": self.address.id, "description": "checkout"},
-            format="json",
-            HTTP_X_TENANT_SLUG=self.tenant_a.slug,
-        )
-        self.assertEqual(response.status_code, 201)
-        order = Order.objects.get(slug=response.data["slug"])
-        self.assertEqual(order.tenant, self.tenant_a)
-        self.assertEqual(order.items.count(), 1)
-        self.assertEqual(order.items.first().variant, self.variant_a)
+            response = self.client.post(
+                "/api/v1/orders/checkout/",
+                {"address_id": self.address.id, "description": "checkout"},
+                format="json",
+                HTTP_X_TENANT_SLUG=self.tenant_a.slug,
+            )
+            self.assertEqual(response.status_code, 201)
+            order = Order.objects.get(slug=response.data["order"]["slug"])
+            self.assertEqual(order.tenant, self.tenant_a)
+            self.assertEqual(order.items.count(), 1)
+            self.assertEqual(order.items.first().variant, self.variant_a)
 
 
 class OrderStaffVisibilityTests(TestCase):
