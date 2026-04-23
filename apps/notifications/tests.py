@@ -1,8 +1,13 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
+from apps.addresses.models import CustomerAddress
 from apps.notifications.models import DeviceToken
+from apps.notifications.push import send_push_to_user
+from apps.notifications.tasks import _send_order_push_notification, send_order_push_notification_task
+from apps.orders.models import Order
 from apps.tenants.models import Tenant
 
 User = get_user_model()
@@ -72,3 +77,62 @@ class NotificationBroadcastTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(Notification.objects.filter(tenant=self.tenant).count(), 2)
+
+
+class NotificationTaskReliabilityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="push-buyer@example.com", username="pushbuyer", password="secret123")
+        self.tenant = Tenant.objects.create(name="Push Tenant", slug="push-tenant", is_active=True, is_default=True)
+        self.address = CustomerAddress.objects.create(
+            user=self.user,
+            street_name="Plot 10",
+            city="Kampala",
+            region=CustomerAddress.Region.KAMPALA_AREA,
+        )
+        self.order = Order.objects.create(
+            user=self.user,
+            tenant=self.tenant,
+            address=self.address,
+            status=Order.Status.PROCESSING,
+            slug="push-order",
+        )
+
+    def test_push_task_has_retry_policy(self):
+        self.assertEqual(send_order_push_notification_task.autoretry_for, (Exception,))
+        self.assertTrue(send_order_push_notification_task.retry_backoff)
+        self.assertTrue(send_order_push_notification_task.retry_jitter)
+        self.assertEqual(send_order_push_notification_task.retry_backoff_max, 300)
+        self.assertEqual(send_order_push_notification_task.max_retries, 5)
+
+    @patch("apps.notifications.tasks.send_push_to_user")
+    def test_missing_order_push_task_skips_without_provider_call(self, send_push):
+        result = _send_order_push_notification(999999)
+
+        self.assertEqual(result, {"success": False, "reason": "order missing"})
+        send_push.assert_not_called()
+
+    @patch("apps.notifications.tasks.send_push_to_user", side_effect=RuntimeError("fcm unavailable"))
+    def test_push_task_reraises_provider_failure_for_celery_retry(self, send_push):
+        with self.assertRaises(RuntimeError):
+            _send_order_push_notification(self.order.id)
+
+        send_push.assert_called_once()
+
+    @patch("apps.notifications.push.messaging.send_each_for_multicast")
+    def test_push_delivery_uses_only_active_tenant_tokens(self, send_multicast):
+        other_tenant = Tenant.objects.create(name="Other Push Tenant", slug="other-push-tenant", is_active=True)
+        DeviceToken.objects.create(user=self.user, tenant=self.tenant, token="tenant-a-token", platform="android")
+        DeviceToken.objects.create(user=self.user, tenant=other_tenant, token="tenant-b-token", platform="android")
+
+        send_multicast.return_value.responses = [type("Result", (), {"success": True})()]
+
+        send_push_to_user(
+            user=self.user,
+            tenant=self.tenant,
+            title="Order updated",
+            body="Your order changed.",
+        )
+
+        send_multicast.assert_called_once()
+        message = send_multicast.call_args.args[0]
+        self.assertEqual(message.tokens, ["tenant-a-token"])

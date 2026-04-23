@@ -14,11 +14,14 @@ class ReviewViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        tenant = getattr(self.request, "tenant", None)
         queryset = (
             Review.objects.select_related("user", "product")
             .filter(user=self.request.user)
             .order_by("-created_at")
         )
+        if tenant is not None:
+            queryset = queryset.filter(product__tenant=tenant)
 
         product_id = self.request.query_params.get("product")
         product_slug = self.request.query_params.get("product_slug")
@@ -63,7 +66,10 @@ class ProductReviewViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
+        tenant = getattr(self.request, "tenant", None)
         queryset = Review.objects.select_related("user", "product").order_by("-created_at")
+        if tenant is not None:
+            queryset = queryset.filter(product__tenant=tenant)
 
         product_id = self.request.query_params.get("product")
         product_slug = self.request.query_params.get("product_slug")
@@ -82,7 +88,10 @@ class ProductRatingViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
 
     def get_queryset(self):
+        tenant = getattr(self.request, "tenant", None)
         queryset = ProductRating.objects.select_related("product").order_by("-updated_at")
+        if tenant is not None:
+            queryset = queryset.filter(product__tenant=tenant)
 
         product_id = self.request.query_params.get("product")
         product_slug = self.request.query_params.get("product_slug")

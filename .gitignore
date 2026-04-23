@@ -11,9 +11,13 @@ __pycache__/
 
 # Development db
 db.sqlite3
+*.sqlite3
+*.sqlite3-journal
+*.db
 
-# Ignore media files
-# /media/*
+# Uploaded/generated files
+/media/
+/staticfiles/
 
 # C extensions
 *.so
@@ -108,6 +112,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.production.example
 .venv
 env/
 venv/

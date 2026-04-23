@@ -44,6 +44,8 @@ def _run_email_task(
         sender(order)
 
         logger.info("Sent %s for order_id=%s", action_label, order_id)
+    except Order.DoesNotExist:
+        logger.warning("Skipping %s for missing order_id=%s", action_label, order_id)
     except Exception:
         logger.exception("Failed %s for order_id=%s", action_label, order_id)
         raise
@@ -135,6 +137,7 @@ def send_order_push_notification_task(self, order_id: int) -> None:
 
         send_push_to_user(
             user=order.user,
+            tenant=order.tenant,
             title="Order updated",
             body=f"Your order {order.slug} is now {order.get_status_display()}",
             data={
@@ -146,6 +149,8 @@ def send_order_push_notification_task(self, order_id: int) -> None:
         )
 
         logger.info("Sent order push notification for order_id=%s", order_id)
+    except Order.DoesNotExist:
+        logger.warning("Skipping order push notification for missing order_id=%s", order_id)
     except Exception:
         logger.exception("Failed order push notification for order_id=%s", order_id)
         raise

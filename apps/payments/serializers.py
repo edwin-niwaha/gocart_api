@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from apps.addresses.models import CustomerAddress
 from apps.orders.models import Order
+from apps.shipping.models import ShippingMethod
 
 from .models import Payment
 
@@ -24,9 +25,14 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
     def validate_order(self, value):
         request = self.context["request"]
 
-        if value.user != request.user:
+        if value.user != request.user or value.tenant_id != getattr(request.tenant, "id", None):
             raise serializers.ValidationError("Order not found.")
 
+        return value
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Payment amount must be greater than zero.")
         return value
 
     def create(self, validated_data):
@@ -41,9 +47,20 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
 
 
 class MTNInitiatePaymentSerializer(serializers.Serializer):
-    address_id = serializers.IntegerField(required=False)
-    order = serializers.IntegerField(required=False)
+    address_id = serializers.IntegerField(min_value=1)
     phone_number = serializers.CharField(max_length=20)
+    shipping_method_id = serializers.PrimaryKeyRelatedField(
+        queryset=ShippingMethod.objects.filter(is_active=True),
+        source="shipping_method",
+        required=False,
+        allow_null=True,
+    )
+    coupon_code = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
 
     def validate_phone_number(self, value: str) -> str:
         raw = value.strip().replace(" ", "")
@@ -66,47 +83,23 @@ class MTNInitiatePaymentSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         request = self.context["request"]
-        address_id = attrs.get("address_id")
-        order_id = attrs.get("order")
-
-        if not address_id and not order_id:
-            raise serializers.ValidationError(
-                {"detail": "Either address_id or order is required."}
-            )
-
-        if address_id:
-            try:
-                address = CustomerAddress.objects.get(
-                    id=address_id,
-                    user=request.user,
-                )
-            except CustomerAddress.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"address_id": "Address not found."}
-                )
-
-            self.context["address_instance"] = address
-            return attrs
+        address_id = attrs["address_id"]
 
         try:
-            order = Order.objects.select_related("address").get(
-                id=order_id,
+            address = CustomerAddress.objects.get(
+                id=address_id,
                 user=request.user,
             )
-        except Order.DoesNotExist:
-            raise serializers.ValidationError({"order": "Order not found."})
-
-        self.context["order_instance"] = order
-
-        address = getattr(order, "address", None)
-        if address is None:
+        except CustomerAddress.DoesNotExist:
             raise serializers.ValidationError(
-                {"detail": "This order does not have a delivery address."}
+                {"address_id": "Address not found."}
             )
 
         self.context["address_instance"] = address
-        attrs["address_id"] = address.id
         return attrs
+
+    def validate_coupon_code(self, value: str) -> str:
+        return value.strip().upper()
 
 
 class PaymentStatusSerializer(serializers.ModelSerializer):

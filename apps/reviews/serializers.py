@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.products.models import Product
 from apps.users.serializers import UserSerializer
 from .models import ProductRating, Review
 
@@ -34,6 +35,17 @@ class ReviewSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None)
+        if tenant is not None:
+            self.fields["product"].queryset = Product.objects.filter(
+                tenant=tenant,
+                is_active=True,
+                category__is_active=True,
+            )
+
     def validate_rating(self, value):
         if not 1 <= value <= 5:
             raise serializers.ValidationError("Rating must be between 1 and 5.")
@@ -45,6 +57,10 @@ class ReviewSerializer(serializers.ModelSerializer):
 
         if not request or not request.user or request.user.is_anonymous:
             return attrs
+
+        tenant = getattr(request, "tenant", None)
+        if tenant is not None and product is not None and product.tenant_id != tenant.id:
+            raise serializers.ValidationError({"product": "Product not found."})
 
         if self.instance is None and product:
             already_exists = Review.objects.filter(

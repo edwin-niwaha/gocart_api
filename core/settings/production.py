@@ -5,10 +5,24 @@ ENVIRONMENT = "production"
 
 if not ALLOWED_HOSTS:
     raise ValueError("ALLOWED_HOSTS must be set in production")
+if "*" in ALLOWED_HOSTS:
+    raise ValueError("ALLOWED_HOSTS cannot contain '*' in production")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL must be set in production")
+if DATABASE_URL.startswith("sqlite"):
+    raise ValueError("SQLite DATABASE_URL is not allowed in production")
 if not CORS_ALLOWED_ORIGINS:
     raise ValueError("CORS_ALLOWED_ORIGINS must be set in production")
+
+ALLOW_INSECURE_PRODUCTION_ORIGINS = env_bool("ALLOW_INSECURE_PRODUCTION_ORIGINS", False)
+for origin in CORS_ALLOWED_ORIGINS + CSRF_TRUSTED_ORIGINS:
+    if not origin.startswith("https://") and not ALLOW_INSECURE_PRODUCTION_ORIGINS:
+        raise ValueError(
+            "Production CORS/CSRF origins must use https:// unless "
+            "ALLOW_INSECURE_PRODUCTION_ORIGINS=True is explicitly set"
+        )
 
 DATABASES = {
     "default": dj_database_url.parse(

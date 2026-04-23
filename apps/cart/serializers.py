@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.products.models import ProductVariant
@@ -118,9 +120,9 @@ class CartItemWriteSerializer(serializers.ModelSerializer):
 
 
 class CartReadSerializer(serializers.ModelSerializer):
-    items = CartItemReadSerializer(many=True, read_only=True)
-    total_items = serializers.ReadOnlyField()
-    total_price = serializers.ReadOnlyField()
+    items = serializers.SerializerMethodField()
+    total_items = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Cart
@@ -134,6 +136,34 @@ class CartReadSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+    def _tenant_items(self, obj):
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None)
+        queryset = obj.items.select_related(
+            "variant",
+            "variant__product",
+            "variant__product__category",
+        )
+        if tenant is not None:
+            queryset = queryset.filter(variant__tenant=tenant)
+        return queryset
+
+    def get_items(self, obj):
+        return CartItemReadSerializer(
+            self._tenant_items(obj),
+            many=True,
+            context=self.context,
+        ).data
+
+    def get_total_items(self, obj):
+        return sum(item.quantity for item in self._tenant_items(obj))
+
+    def get_total_price(self, obj):
+        return sum(
+            (item.line_total for item in self._tenant_items(obj)),
+            Decimal("0.00"),
+        )
 
 
 class CartWriteSerializer(serializers.ModelSerializer):

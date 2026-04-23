@@ -2,7 +2,7 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.tenants.permissions import IsTenantManager, is_platform_admin
+from apps.tenants.permissions import IsTenantManager
 from apps.tenants.utils import user_is_tenant_staff
 from .models import Shipment, ShippingMethod
 from .serializers import (
@@ -21,7 +21,10 @@ from .services import (
 
 class IsShipmentOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        return bool(request.user and (user_is_tenant_staff(request.user, getattr(request, "tenant", None)) or obj.order.user == request.user))
+        tenant = getattr(request, "tenant", None)
+        if tenant is None or obj.order.tenant_id != tenant.id:
+            return False
+        return bool(request.user and (user_is_tenant_staff(request.user, tenant) or obj.order.user == request.user))
 
 
 class ShippingMethodViewSet(viewsets.ModelViewSet):
@@ -42,13 +45,14 @@ class ShipmentViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsShipmentOwnerOrAdmin]
 
     def get_queryset(self):
+        tenant = self.request.tenant
         queryset = Shipment.objects.select_related(
             "order",
             "order__user",
             "address",
             "shipping_method",
-        ).order_by("-created_at")
-        if user_is_tenant_staff(self.request.user, getattr(self.request, "tenant", None)):
+        ).filter(order__tenant=tenant).order_by("-created_at")
+        if user_is_tenant_staff(self.request.user, tenant):
             return queryset
         return queryset.filter(order__user=self.request.user)
 

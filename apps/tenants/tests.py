@@ -18,6 +18,13 @@ class TenantApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["slug"], "alt")
 
+    def test_invalid_explicit_tenant_header_fails_closed(self):
+        response = self.client.get("/api/v1/tenants/current/", HTTP_X_TENANT_SLUG="missing-tenant")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Tenant not found.")
+        self.assertEqual(response.json()["code"], "tenant_not_found")
+
     def test_authenticated_user_membership_resolves_tenant(self):
         user = User.objects.create_user(email="member@example.com", username="member", password="pass123456")
         TenantMembership.objects.create(tenant=self.tenant, user=user, role=TenantMembership.Role.TENANT_ADMIN)

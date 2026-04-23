@@ -1,5 +1,6 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import DeviceToken, Notification
@@ -47,7 +48,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         title = str(request.data.get("title", "")).strip()
         message = str(request.data.get("message", "")).strip()
         if not title or not message:
-            return Response({"detail": "title and message are required."}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValidationError({"detail": "title and message are required."})
         users = []
         seen = set()
         for membership in request.tenant.memberships.select_related("user").filter(is_active=True):
@@ -88,7 +89,7 @@ class DeviceTokenViewSet(viewsets.GenericViewSet):
     def unregister(self, request, *args, **kwargs):
         token = str(request.data.get("token", "")).strip()
         if not token:
-            return Response({"detail": "token is required."}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValidationError({"detail": "token is required."})
 
         updated = DeviceToken.objects.filter(user=request.user, tenant=request.tenant, token=token).update(is_active=False)
         return Response(

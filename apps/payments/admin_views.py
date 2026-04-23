@@ -2,6 +2,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from rest_framework import generics, status
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -115,10 +116,7 @@ class AdminPaymentDetailView(APIView):
     def patch(self, request, pk):
         payment = self.get_payment(request, pk)
         if not payment:
-            return Response(
-                {"detail": "Payment not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise NotFound("Payment not found.")
 
         serializer = AdminPaymentSerializer(
             payment,

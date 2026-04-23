@@ -16,11 +16,19 @@ def chunked(values: list[str], size: int) -> Iterable[list[str]]:
         yield values[i:i + size]
 
 
-def send_push_to_user(*, user, title: str, body: str, data: dict[str, str] | None = None) -> None:
-    tokens = list(
-        DeviceToken.objects.filter(user=user, is_active=True)
-        .values_list("token", flat=True)
-    )
+def send_push_to_user(
+    *,
+    user,
+    title: str,
+    body: str,
+    data: dict[str, str] | None = None,
+    tenant=None,
+) -> None:
+    queryset = DeviceToken.objects.filter(user=user, is_active=True)
+    if tenant is not None:
+        queryset = queryset.filter(tenant=tenant)
+
+    tokens = list(queryset.values_list("token", flat=True))
 
     if not tokens:
         logger.info("No active push tokens for user_id=%s", user.id)

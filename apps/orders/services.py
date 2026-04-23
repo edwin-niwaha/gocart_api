@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from uuid import uuid4
 
 from django.db import transaction
@@ -38,14 +39,20 @@ def create_order(*, user, tenant: Tenant, **validated_data) -> Order:
 
 
 @transaction.atomic
-def add_order_item(*, order: Order, variant: ProductVariant, quantity: int) -> OrderItem:
+def add_order_item(
+    *,
+    order: Order,
+    variant: ProductVariant,
+    quantity: int,
+    unit_price: Decimal | None = None,
+) -> OrderItem:
     return OrderItem.objects.create(
         tenant=order.tenant,
         order=order,
         product=variant.product,
         variant=variant,
         quantity=quantity,
-        unit_price=variant.price,
+        unit_price=unit_price if unit_price is not None else variant.price,
     )
 
 

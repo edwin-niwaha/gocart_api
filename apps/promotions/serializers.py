@@ -47,14 +47,14 @@ class CouponSerializer(serializers.ModelSerializer):
 
 
 class CouponValidateSerializer(serializers.Serializer):
-    code = serializers.CharField()
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    code = serializers.CharField(max_length=50, trim_whitespace=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
 
     def validate(self, attrs):
         from django.utils import timezone
         from .models import Coupon
 
-        code = attrs["code"].upper()
+        code = attrs["code"].strip().upper()
         amount = attrs["amount"]
 
         tenant = getattr(self.context.get("request"), "tenant", None)
@@ -78,4 +78,13 @@ class CouponValidateSerializer(serializers.Serializer):
             raise serializers.ValidationError({"amount": "Order amount does not meet coupon minimum."})
 
         attrs["coupon"] = coupon
+        attrs["code"] = code
         return attrs
+
+
+class CouponApplySerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=50, trim_whitespace=True)
+    order_id = serializers.IntegerField(min_value=1)
+
+    def validate_code(self, value: str) -> str:
+        return value.strip().upper()

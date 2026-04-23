@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.addresses import views as address_views
+from apps.analytics import views as analytics_views
 from apps.cart import views as cart_views
 from apps.common import views as common_views
 from apps.notifications import views as notification_views
@@ -51,5 +52,6 @@ urlpatterns = [
     path("rest-auth/registration/", include("dj_rest_auth.registration.urls")),
     path("payments/", include("apps.payments.urls")),
     path("admin/payments/", include("apps.payments.admin_urls")),
+    path("admin/dashboard/summary/", analytics_views.AdminDashboardSummaryView.as_view(), name="admin-dashboard-summary"),
     path("", include(router.urls)),
 ]

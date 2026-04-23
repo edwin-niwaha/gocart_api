@@ -1,12 +1,13 @@
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 
 from apps.common.views import create_audit_log
 from apps.tenants.permissions import IsTenantManager
 from apps.tenants.utils import user_is_tenant_staff
 from .models import Coupon
-from .serializers import CouponSerializer, CouponValidateSerializer
+from .serializers import CouponApplySerializer, CouponSerializer, CouponValidateSerializer
 from .services import apply_coupon_to_order, calculate_coupon_discount, get_valid_coupon
 
 
@@ -31,7 +32,7 @@ class CouponViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="validate")
     def validate_coupon(self, request):
-        serializer = CouponValidateSerializer(data=request.data)
+        serializer = CouponValidateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         coupon = get_valid_coupon(code=serializer.validated_data["code"], tenant=request.tenant)
         amount = serializer.validated_data["amount"]
@@ -41,16 +42,19 @@ class CouponViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="apply-to-order", permission_classes=[permissions.IsAuthenticated])
     def apply_to_order(self, request):
-        code = request.data.get("code", "")
-        order = getattr(request, "order", None)
-        order_id = request.data.get("order_id")
-        if order is None:
-            from apps.orders.models import Order
-            try:
-                order = Order.objects.prefetch_related("items", "items__product").get(pk=order_id, tenant=request.tenant)
-            except Order.DoesNotExist:
-                return Response({"detail": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = CouponApplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        from apps.orders.models import Order
+        try:
+            order = Order.objects.prefetch_related("items", "items__product").get(
+                pk=serializer.validated_data["order_id"],
+                tenant=request.tenant,
+            )
+        except Order.DoesNotExist:
+            raise NotFound("Order not found.")
+
         if not user_is_tenant_staff(request.user, getattr(request, "tenant", None)) and order.user != request.user:
-            return Response({"detail": "You cannot apply a coupon to another user's order."}, status=status.HTTP_403_FORBIDDEN)
-        result = apply_coupon_to_order(order=order, code=code)
+            raise PermissionDenied("You cannot apply a coupon to another user's order.")
+        result = apply_coupon_to_order(order=order, code=serializer.validated_data["code"])
         return Response({"coupon": result["coupon"].code, "discount": result["discount"], "final_amount": result["final_amount"]}, status=status.HTTP_200_OK)

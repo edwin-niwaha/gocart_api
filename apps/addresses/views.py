@@ -1,7 +1,9 @@
 from django.db.models.deletion import ProtectedError
 from rest_framework import permissions, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from apps.tenants.permissions import is_platform_admin
 from .models import CustomerAddress
 from .serializers import CustomerAddressSerializer
 from .services import create_address, delete_address, update_address
@@ -9,7 +11,7 @@ from .services import create_address, delete_address, update_address
 
 class IsAddressOwner(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
-        if request.user and request.user.is_staff:
+        if is_platform_admin(request.user):
             return True
         return obj.user == request.user
 
@@ -22,7 +24,7 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
         queryset = CustomerAddress.objects.select_related("user").order_by(
             "-is_default", "-created_at"
         )
-        if self.request.user.is_staff:
+        if is_platform_admin(self.request.user):
             return queryset
         return queryset.filter(user=self.request.user)
 
@@ -62,11 +64,10 @@ class CustomerAddressViewSet(viewsets.ModelViewSet):
             self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ProtectedError:
-            return Response(
+            raise ValidationError(
                 {
                     "detail": "This address cannot be deleted because it is linked to existing records."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                }
             )
 
     def perform_destroy(self, instance):

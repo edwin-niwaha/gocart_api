@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -40,7 +41,10 @@ class TenantViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class CurrentTenantBrandingView(APIView):
-    permission_classes = [permissions.AllowAny]
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsTenantAdmin()]
 
     def get(self, request, *args, **kwargs):
         tenant = request.tenant
@@ -48,8 +52,6 @@ class CurrentTenantBrandingView(APIView):
         return Response(TenantBrandingSerializer(branding).data)
 
     def patch(self, request, *args, **kwargs):
-        if not (request.user.is_authenticated and IsTenantAdmin().has_permission(request, self)):
-            return Response({"detail": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
         branding, _ = TenantBranding.objects.get_or_create(tenant=request.tenant, defaults={"app_name": request.tenant.name})
         serializer = TenantBrandingSerializer(branding, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -58,7 +60,10 @@ class CurrentTenantBrandingView(APIView):
 
 
 class CurrentTenantSettingsView(APIView):
-    permission_classes = [permissions.AllowAny]
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsTenantAdmin()]
 
     def get(self, request, *args, **kwargs):
         tenant = request.tenant
@@ -66,8 +71,6 @@ class CurrentTenantSettingsView(APIView):
         return Response(TenantSettingsSerializer(settings_obj).data)
 
     def patch(self, request, *args, **kwargs):
-        if not (request.user.is_authenticated and IsTenantAdmin().has_permission(request, self)):
-            return Response({"detail": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
         settings_obj, _ = TenantSettings.objects.get_or_create(tenant=request.tenant)
         serializer = TenantSettingsSerializer(settings_obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -76,15 +79,16 @@ class CurrentTenantSettingsView(APIView):
 
 
 class CurrentTenantFeatureFlagView(APIView):
-    permission_classes = [permissions.AllowAny]
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated(), IsTenantAdmin()]
 
     def get(self, request, *args, **kwargs):
         flags = TenantFeatureFlag.objects.filter(tenant=request.tenant).order_by("key")
         return Response(TenantFeatureFlagSerializer(flags, many=True).data)
 
     def post(self, request, *args, **kwargs):
-        if not (request.user.is_authenticated and IsTenantAdmin().has_permission(request, self)):
-            return Response({"detail": "You do not have permission to perform this action."}, status=status.HTTP_403_FORBIDDEN)
         serializer = TenantFeatureFlagWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         flag, _ = TenantFeatureFlag.objects.update_or_create(
@@ -125,7 +129,7 @@ class CurrentTenantMembershipListCreateView(APIView):
         if data.get("user_id"):
             user = User.objects.filter(pk=data["user_id"]).first()
             if not user:
-                return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+                raise NotFound("User not found.")
         else:
             email = User.objects.normalize_email(data["email"]).lower()  # type: ignore[attr-defined]
             user = User.objects.filter(email__iexact=email).first()
@@ -139,7 +143,7 @@ class CurrentTenantMembershipListCreateView(APIView):
                 )
 
         if user == request.user and data["role"] != actor_role and not is_platform_admin(request.user):
-            return Response({"detail": "You cannot change your own role here."}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValidationError({"detail": "You cannot change your own role here."})
 
         membership, created = TenantMembership.objects.update_or_create(
             tenant=tenant,
@@ -170,11 +174,11 @@ class CurrentTenantMembershipDetailView(APIView):
         actor_role = get_user_tenant_role(request.user, tenant)
         membership = TenantMembership.objects.select_related("user", "tenant").filter(pk=membership_id, tenant=tenant).first()
         if not membership:
-            return Response({"detail": "Membership not found."}, status=status.HTTP_404_NOT_FOUND)
+            raise NotFound("Membership not found.")
         if membership.user == request.user and not is_platform_admin(request.user):
-            return Response({"detail": "You cannot update your own membership here."}, status=status.HTTP_400_BAD_REQUEST)
+            raise ValidationError({"detail": "You cannot update your own membership here."})
         if actor_role and ROLE_ORDER.get(membership.role, 0) >= ROLE_ORDER.get(actor_role, 0) and not is_platform_admin(request.user):
-            return Response({"detail": "You cannot modify a membership at or above your own role."}, status=status.HTTP_403_FORBIDDEN)
+            raise PermissionDenied("You cannot modify a membership at or above your own role.")
 
         serializer = TenantMembershipUpdateSerializer(
             data=request.data,
