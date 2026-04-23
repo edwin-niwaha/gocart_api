@@ -132,12 +132,14 @@ TEMPLATES = [
 
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
 
+USE_SQLITE = DATABASE_URL.startswith("sqlite")
+
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
         conn_max_age=600,
         conn_health_checks=True,
-        ssl_require=not os.getenv("DEBUG", "False") == "True",
+        ssl_require=not USE_SQLITE and not DEBUG,
     )
 }
 
