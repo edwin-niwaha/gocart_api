@@ -32,6 +32,16 @@ def _code_from_detail(value, default: str) -> str:
     return default
 
 
+def _contains_error_code(value, *codes: str) -> bool:
+    if isinstance(value, ErrorDetail):
+        return value.code in set(codes)
+    if isinstance(value, list):
+        return any(_contains_error_code(item, *codes) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_error_code(item, *codes) for item in value.values())
+    return False
+
+
 def _error_payload(*, detail, errors=None, code: str = "error") -> dict:
     return {
         "detail": str(detail),
@@ -51,9 +61,21 @@ def api_exception_handler(exc, context):
         detail = _message_from_detail(original_data) or "Validation error."
         errors = original_data
 
-        if isinstance(original_data, dict) and set(original_data.keys()) == {"detail"}:
-            detail = _message_from_detail(original_data["detail"])
-            errors = {}
+        if isinstance(original_data, dict):
+            if set(original_data.keys()) == {"detail"}:
+                detail = _message_from_detail(original_data["detail"]) or detail
+                errors = {}
+            elif "detail" in original_data:
+                detail = _message_from_detail(original_data["detail"]) or detail
+                errors = {
+                    key: value
+                    for key, value in original_data.items()
+                    if key != "detail"
+                }
+            elif _contains_error_code(original_data, "does_not_exist", "incorrect_type"):
+                detail = "Validation error."
+        elif not isinstance(original_data, dict):
+            detail = _message_from_detail(original_data) or detail
 
         response.data = _error_payload(
             detail=detail,
