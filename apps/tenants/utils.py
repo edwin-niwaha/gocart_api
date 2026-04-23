@@ -26,7 +26,7 @@ def resolve_tenant_from_request(request) -> Tenant:
     ).strip().lower()
 
     if slug:
-        tenant = Tenant.objects.filter(slug=slug, is_active=True).first()
+        tenant = Tenant.objects.filter(slug__iexact=slug, is_active=True).first()
         if tenant:
             return tenant
         raise TenantResolutionError("Tenant not found.")
