@@ -43,6 +43,14 @@ class Payment(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="payments",
+        null=True,
+        blank=True,
+    )
+    guest_session_key = models.CharField(
+        max_length=40,
+        blank=True,
+        null=True,
+        db_index=True,
     )
     order = models.ForeignKey(
         Order,
@@ -86,6 +94,7 @@ class Payment(TimeStampedModel):
         indexes = [
             models.Index(fields=["tenant", "reference"]),
             models.Index(fields=["tenant", "status"]),
+            models.Index(fields=["tenant", "guest_session_key"]),
             models.Index(fields=["created_at"]),
         ]
 

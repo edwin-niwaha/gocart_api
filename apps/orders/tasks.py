@@ -64,7 +64,7 @@ def send_order_confirmation_email_task(self, order_id: int) -> None:
         order_id=order_id,
         action_label="order confirmation email",
         sender=send_order_confirmation_email,
-        recipient_getter=lambda order: getattr(order.user, "email", None),
+        recipient_getter=lambda order: order.contact_email or None,
     )
 
 
@@ -97,7 +97,7 @@ def send_customer_order_status_email_task(self, order_id: int) -> None:
         order_id=order_id,
         action_label="customer order status email",
         sender=send_customer_order_status_email,
-        recipient_getter=lambda order: getattr(order.user, "email", None),
+        recipient_getter=lambda order: order.contact_email or None,
     )
 
 
@@ -128,6 +128,12 @@ def send_admin_order_status_email_task(self, order_id: int) -> None:
 def send_order_push_notification_task(self, order_id: int) -> None:
     try:
         order = _get_order(order_id)
+        if not order.user_id:
+            logger.info(
+                "Skipping order push notification for guest order_id=%s",
+                order_id,
+            )
+            return
 
         logger.info(
             "Sending order push notification for order_id=%s user_id=%s",

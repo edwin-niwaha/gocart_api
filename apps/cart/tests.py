@@ -115,3 +115,58 @@ class CartTenantIsolationTests(TestCase):
         item_ids = [item["id"] for item in response.data["results"]]
         self.assertEqual(item_ids, [staff_item.id])
         self.assertNotIn(customer_item.id, item_ids)
+
+
+class GuestCartSessionTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.tenant = Tenant.objects.create(
+            name="Guest Cart Tenant",
+            slug="guest-cart-tenant",
+            is_active=True,
+            is_default=True,
+        )
+        self.category = Category.objects.create(
+            tenant=self.tenant,
+            name="Snacks",
+            slug="snacks",
+        )
+        self.product = Product.objects.create(
+            tenant=self.tenant,
+            category=self.category,
+            title="Biscuits",
+            slug="biscuits",
+        )
+        self.variant = ProductVariant.objects.create(
+            tenant=self.tenant,
+            product=self.product,
+            name="Pack",
+            sku="guest-biscuits-pack",
+            price="2500.00",
+            stock_quantity=12,
+        )
+
+    def test_guest_cart_uses_session_owner_and_returns_items(self):
+        add_response = self.client.post(
+            "/api/v1/cart-items/",
+            {"variant_id": self.variant.id, "quantity": 2},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+        cart_response = self.client.post(
+            "/api/v1/cart/",
+            {},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(add_response.status_code, 201)
+        self.assertEqual(cart_response.status_code, 200)
+        self.assertIsNone(cart_response.data["user"])
+        self.assertEqual(cart_response.data["total_items"], 2)
+        self.assertEqual(Decimal(str(cart_response.data["total_price"])), Decimal("5000.00"))
+        self.assertEqual(len(cart_response.data["items"]), 1)
+
+        cart = Cart.objects.get()
+        self.assertIsNone(cart.user)
+        self.assertTrue(cart.guest_session_key)

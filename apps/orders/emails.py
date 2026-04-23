@@ -26,9 +26,12 @@ class EmailSpec:
     skip_log_message: str
 
 
+def _customer_email(order: Order) -> str | None:
+    return order.contact_email or None
+
+
 def _display_name(order: Order) -> str:
-    full_name = order.user.get_full_name().strip()
-    return full_name or order.user.email or "Customer"
+    return order.contact_name
 
 
 def _common_context(order: Order) -> dict[str, Any]:
@@ -37,6 +40,10 @@ def _common_context(order: Order) -> dict[str, Any]:
         "user": order.user,
         "items": order.items.all(),
         "display_name": _display_name(order),
+        "customer_email": _customer_email(order),
+        "delivery_street_name": order.delivery_street_name,
+        "delivery_city": order.delivery_city,
+        "delivery_region": order.delivery_region,
         "shop_name": SHOP_NAME,
         "support_email": settings.DEFAULT_FROM_EMAIL,
         "admin_email": settings.DEFAULT_FROM_EMAIL,
@@ -90,7 +97,7 @@ def _send_order_email(order: Order, spec: EmailSpec, *, extra_context: dict[str,
 ORDER_EMAILS: dict[str, EmailSpec] = {
     "order_confirmation": EmailSpec(
         subject_builder=lambda order: f"Order received: {order.slug}",
-        recipient_getter=lambda order: order.user.email,
+        recipient_getter=_customer_email,
         text_template="order_emails/order_confirmation.txt",
         html_template="order_emails/order_confirmation.html",
         skip_log_message="Order confirmation skipped: order_id=%s has no user email",
@@ -104,7 +111,7 @@ ORDER_EMAILS: dict[str, EmailSpec] = {
     ),
     "customer_order_status": EmailSpec(
         subject_builder=lambda order: f"Order update: {order.slug} is now {order.get_status_display()}",
-        recipient_getter=lambda order: order.user.email,
+        recipient_getter=_customer_email,
         text_template="order_emails/customer_order_status.txt",
         html_template="order_emails/customer_order_status.html",
         skip_log_message="Customer status email skipped: order_id=%s has no user email",

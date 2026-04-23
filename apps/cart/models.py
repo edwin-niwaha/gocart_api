@@ -1,3 +1,4 @@
+import inspect
 from decimal import Decimal
 
 from django.conf import settings
@@ -9,20 +10,56 @@ from apps.common.models import TimeStampedModel
 from apps.products.models import ProductVariant
 
 
+_CHECK_CONSTRAINT_USES_CONDITION = (
+    "condition" in inspect.signature(models.CheckConstraint).parameters
+)
+
+
+def build_check_constraint(*, predicate, name: str) -> models.CheckConstraint:
+    kwargs = {"name": name}
+    kwargs["condition" if _CHECK_CONSTRAINT_USES_CONDITION else "check"] = predicate
+    return models.CheckConstraint(**kwargs)
+
+
 class Cart(TimeStampedModel):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="cart",
+        null=True,
+        blank=True,
+    )
+    guest_session_key = models.CharField(
+        max_length=40,
+        null=True,
+        blank=True,
+        unique=True,
+        db_index=True,
     )
 
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "Cart"
         verbose_name_plural = "Carts"
+        constraints = [
+            build_check_constraint(
+                predicate=models.Q(user__isnull=False)
+                | models.Q(guest_session_key__isnull=False),
+                name="cart_requires_user_or_guest_session",
+            ),
+            build_check_constraint(
+                predicate=~(
+                    models.Q(user__isnull=False)
+                    & models.Q(guest_session_key__isnull=False)
+                ),
+                name="cart_owner_is_exclusive",
+            ),
+        ]
 
     def __str__(self) -> str:
-        return f"Cart ({self.user.email})"
+        if self.user_id:
+            return f"Cart ({self.user.email})"
+        return f"Guest Cart ({(self.guest_session_key or 'unknown')[:8]})"
 
     @property
     def total_items(self) -> int:

@@ -405,3 +405,72 @@ class OrderTaskReliabilityTests(TestCase):
             )
 
         sender.assert_called_once_with(self.order)
+
+
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True, ENABLE_EMAIL=False)
+class GuestOrderCheckoutTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.tenant = Tenant.objects.create(
+            name="Guest Checkout Tenant",
+            slug="guest-checkout-tenant",
+            is_active=True,
+            is_default=True,
+        )
+        self.category = Category.objects.create(
+            tenant=self.tenant,
+            name="Bakery",
+            slug="bakery",
+        )
+        self.product = Product.objects.create(
+            tenant=self.tenant,
+            category=self.category,
+            title="Cake",
+            slug="cake",
+        )
+        self.variant = ProductVariant.objects.create(
+            tenant=self.tenant,
+            product=self.product,
+            name="Whole",
+            sku="cake-whole",
+            price="12000.00",
+            stock_quantity=10,
+        )
+
+    def test_guest_checkout_creates_guest_order_and_cash_payment(self):
+        add_response = self.client.post(
+            "/api/v1/cart-items/",
+            {"variant_id": self.variant.id, "quantity": 2},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+        checkout_response = self.client.post(
+            "/api/v1/orders/checkout/",
+            {
+                "customer_name": "Guest Customer",
+                "customer_email": "guest.customer@example.com",
+                "customer_phone": "0772123456",
+                "street_name": "Plot 44",
+                "city": "Kampala",
+                "region": "kampala_area",
+                "description": "guest checkout",
+                "payment_method": Payment.Provider.CASH,
+            },
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(add_response.status_code, 201)
+        self.assertEqual(checkout_response.status_code, 201)
+
+        order = Order.objects.get(slug=checkout_response.data["order"]["slug"])
+        payment = Payment.objects.get(order=order)
+
+        self.assertIsNone(order.user)
+        self.assertTrue(order.guest_session_key)
+        self.assertEqual(order.customer_email, "guest.customer@example.com")
+        self.assertEqual(order.address_street_name, "Plot 44")
+        self.assertEqual(order.total_price, Decimal("24000.00"))
+        self.assertIsNone(payment.user)
+        self.assertEqual(payment.amount, order.total_price)
+        self.assertFalse(CartItem.objects.exists())

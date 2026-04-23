@@ -39,8 +39,8 @@
 
                 <h3 style="margin:0 0 10px;font-size:18px;color:#111827;">Delivery address</h3>
                 <p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:#374151;">
-                  {{ order.address.street_name }}<br>
-                  {{ order.address.city }}
+                  {{ delivery_street_name }}<br>
+                  {{ delivery_city }}{% if delivery_region %}, {{ delivery_region }}{% endif %}
                 </p>
 
                 <h3 style="margin:0 0 12px;font-size:18px;color:#111827;">Order items</h3>

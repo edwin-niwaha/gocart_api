@@ -23,7 +23,7 @@
                   <tr>
                     <td style="padding:18px;">
                       <div style="padding:4px 0;font-size:14px;"><strong>Order Number:</strong> {{ order.slug }}</div>
-                      <div style="padding:4px 0;font-size:14px;"><strong>Customer:</strong> {{ user.email }}</div>
+                      <div style="padding:4px 0;font-size:14px;"><strong>Customer:</strong> {{ customer_email }}</div>
                       <div style="padding:4px 0;font-size:14px;"><strong>Status:</strong> {{ order.get_status_display }}</div>
                       <div style="padding:4px 0;font-size:14px;"><strong>Total:</strong> {{ order.total_price }}</div>
                     </td>
@@ -32,8 +32,8 @@
 
                 <h3 style="margin:0 0 10px;font-size:18px;color:#111827;">Delivery address</h3>
                 <p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:#374151;">
-                  {{ order.address.street_name }}<br>
-                  {{ order.address.city }}
+                  {{ delivery_street_name }}<br>
+                  {{ delivery_city }}{% if delivery_region %}, {{ delivery_region }}{% endif %}
                 </p>
 
                 <h3 style="margin:0 0 12px;font-size:18px;color:#111827;">Items</h3>
