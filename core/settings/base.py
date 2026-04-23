@@ -6,6 +6,7 @@ import sys
 
 import dj_database_url
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv()
@@ -39,9 +40,9 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 SITE_ID = int(os.getenv("SITE_ID", 1))
 
 ENABLE_EMAIL = env_bool("ENABLE_EMAIL", True)
-ENABLE_FIREBASE = env_bool("ENABLE_FIREBASE", False)
-ENABLE_MOMO = env_bool("ENABLE_MOMO", False)
-ENABLE_CLOUDINARY = env_bool("ENABLE_CLOUDINARY", False)
+ENABLE_FIREBASE = env_bool("ENABLE_FIREBASE", True)
+ENABLE_MOMO = env_bool("ENABLE_MOMO", True)
+ENABLE_CLOUDINARY = env_bool("ENABLE_CLOUDINARY", True)
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -86,12 +87,14 @@ LOCAL_APPS = [
     "apps.shipping",
     "apps.promotions",
     "apps.notifications",
+    "apps.analytics",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "core.middleware.RequestIDMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.sites.middleware.CurrentSiteMiddleware",
@@ -128,11 +131,13 @@ TEMPLATES = [
 ]
 
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
+
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
         conn_max_age=600,
         conn_health_checks=True,
+        ssl_require=not os.getenv("DEBUG", "False") == "True",
     )
 }
 
@@ -197,6 +202,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "core.exceptions.api_exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
@@ -239,6 +245,10 @@ REST_AUTH = {
 }
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "idempotency-key",
+    "x-tenant-slug",
+]
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG" if DEBUG else "INFO")
 LOGGING = {
@@ -260,6 +270,18 @@ LOGGING = {
     "root": {
         "handlers": ["console"],
         "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": os.getenv("DJANGO_REQUEST_LOG_LEVEL", "WARNING"),
+            "propagate": False,
+        },
+        "apps": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
     },
 }
 
@@ -288,6 +310,15 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 CELERY_TASK_EAGER_PROPAGATES = env_bool("CELERY_TASK_EAGER_PROPAGATES", False)
+CELERY_TASK_ACKS_LATE = env_bool("CELERY_TASK_ACKS_LATE", True)
+CELERY_TASK_REJECT_ON_WORKER_LOST = env_bool("CELERY_TASK_REJECT_ON_WORKER_LOST", True)
+CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", 1))
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = env_bool(
+    "CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP",
+    True,
+)
+
+ENABLED_CHECKOUT_PAYMENT_METHODS = env_list("ENABLED_CHECKOUT_PAYMENT_METHODS", "CASH")
 
 SUBSCRIPTION_KEY = os.getenv("SUBSCRIPTION_KEY")
 MOMO_API_USER = os.getenv("MOMO_API_USER")

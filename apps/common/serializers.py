@@ -5,17 +5,34 @@ from .models import AuditLog, SupportMessage
 
 
 class ContactMessageSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=120)
+    name = serializers.CharField(max_length=120, trim_whitespace=True)
     email = serializers.EmailField()
-    subject = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    message = serializers.CharField(max_length=5000)
+    subject = serializers.CharField(max_length=255, required=False, allow_blank=True, trim_whitespace=True)
+    message = serializers.CharField(max_length=5000, trim_whitespace=True)
+
+    def validate_name(self, value: str) -> str:
+        if not value.strip():
+            raise serializers.ValidationError("Name is required.")
+        return value.strip()
+
+    def validate_message(self, value: str) -> str:
+        message = value.strip()
+        if len(message) < 5:
+            raise serializers.ValidationError("Message must be at least 5 characters.")
+        return message
 
 class NewsletterSubscribeSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
+
 
 class NewsletterUnsubscribeSerializer(serializers.Serializer):
     email = serializers.EmailField()
+
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
     
         
 class SupportMessageSerializer(serializers.ModelSerializer):

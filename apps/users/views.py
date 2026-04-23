@@ -3,15 +3,16 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.parsers import FormParser, MultiPartParser, JSONParser
-from rest_framework.exceptions import ValidationError
-from rest_framework.generics import RetrieveAPIView
+from rest_framework.exceptions import Throttled, ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from apps.tenants.models import TenantMembership
+from apps.tenants.permissions import is_platform_admin, user_has_tenant_role
 from rest_framework_simplejwt.tokens import RefreshToken
+import logging
 
 from .models import EmailOTP
 from .serializers import (
@@ -38,6 +39,7 @@ from .services import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class AuthAnonThrottle(AnonRateThrottle):
@@ -52,7 +54,20 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
     authentication_classes = [JWTAuthentication]
-    queryset = User.objects.prefetch_related("tenant_memberships__tenant").all().order_by("-created_at")
+
+    def get_queryset(self):
+        queryset = User.objects.prefetch_related("tenant_memberships__tenant").order_by("-created_at")
+        if is_platform_admin(self.request.user):
+            return queryset
+
+        tenant = getattr(self.request, "tenant", None)
+        if user_has_tenant_role(self.request.user, tenant, TenantMembership.Role.STAFF):
+            return queryset.filter(
+                tenant_memberships__tenant=tenant,
+                tenant_memberships__is_active=True,
+            ).distinct()
+
+        return queryset.filter(pk=self.request.user.pk)
 
 
 class RegisterView(APIView):
@@ -119,21 +134,18 @@ class MeView(generics.RetrieveUpdateAPIView):
         return UserSerializer
 
     def patch(self, request, *args, **kwargs):
-        print("PATCH HIT /auth/me/")
-        print("CONTENT TYPE:", request.content_type)
-        print("DATA:", request.data)
-        print("FILES:", request.FILES)
-
         serializer = self.get_serializer(
             self.get_object(),
             data=request.data,
             partial=True,
         )
-        print("SERIALIZER VALID:", serializer.is_valid())
-        print("SERIALIZER ERRORS:", serializer.errors)
-
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        logger.info(
+            "Updated profile user_id=%s request_id=%s",
+            request.user.id,
+            getattr(request, "id", ""),
+        )
 
         return Response(UserSerializer(request.user).data)
     
@@ -227,29 +239,20 @@ class ResetPasswordView(APIView):
 
         user = User.objects.filter(email__iexact=email, is_active=True).first()
         if not user:
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Invalid or expired code."})
 
         otp = get_latest_active_otp(
             user=user,
             purpose=EmailOTP.Purpose.RESET_PASSWORD,
         )
         if not otp or otp.is_used() or otp.is_expired() or not otp.can_attempt():
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Invalid or expired code."})
 
         otp.attempts += 1
         otp.save(update_fields=["attempts"])
 
         if not otp.verify_code(code):
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Invalid or expired code."})
 
         otp.used_at = timezone.now()
         otp.save(update_fields=["used_at"])
@@ -277,16 +280,10 @@ class ChangePasswordView(APIView):
         new_password = serializer.validated_data["new_password"]
 
         if not user.check_password(current_password):
-            return Response(
-                {"current_password": ["Current password is incorrect."]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"current_password": ["Current password is incorrect."]})
 
         if current_password == new_password:
-            return Response(
-                {"new_password": ["New password must be different from current password."]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"new_password": ["New password must be different from current password."]})
 
         user.set_password(new_password)
         user.save(update_fields=["password"])
@@ -318,10 +315,7 @@ class SendEmailVerificationView(APIView):
             user=user,
             purpose=EmailOTP.Purpose.VERIFY_EMAIL,
         ):
-            return Response(
-                {"detail": "Please wait before requesting another code."},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
+            raise Throttled(detail="Please wait before requesting another code.")
 
         _, raw_code = issue_email_otp(
             user=user,
@@ -359,19 +353,13 @@ class VerifyEmailView(APIView):
             purpose=EmailOTP.Purpose.VERIFY_EMAIL,
         )
         if not otp or otp.is_used() or otp.is_expired() or not otp.can_attempt():
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Invalid or expired code."})
 
         otp.attempts += 1
         otp.save(update_fields=["attempts"])
 
         if not otp.verify_code(code):
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Invalid or expired code."})
 
         otp.used_at = timezone.now()
         otp.save(update_fields=["used_at"])

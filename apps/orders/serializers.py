@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from django.conf import settings
 from rest_framework import serializers
 
 from apps.addresses.models import CustomerAddress
 from apps.payments.models import Payment
+from apps.shipping.models import ShippingMethod
+from apps.tenants.utils import user_is_tenant_staff
 from .models import Order, OrderItem, OrderStatusEvent
+
+
+def _validate_order_address_owner(serializer, value: CustomerAddress) -> CustomerAddress:
+    request = serializer.context["request"]
+    instance = getattr(serializer, "instance", None)
+    expected_user = getattr(instance, "user", request.user)
+
+    if value.user_id != expected_user.id:
+        raise serializers.ValidationError("Address not found.")
+
+    return value
 
 
 class OrderItemReadSerializer(serializers.ModelSerializer):
@@ -96,6 +110,18 @@ class OrderCheckoutSerializer(serializers.Serializer):
         source="address",
     )
     description = serializers.CharField(required=False, allow_blank=True)
+    shipping_method_id = serializers.PrimaryKeyRelatedField(
+        queryset=ShippingMethod.objects.filter(is_active=True),
+        source="shipping_method",
+        required=False,
+        allow_null=True,
+    )
+    coupon_code = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
     payment_method = serializers.ChoiceField(
         choices=[
             Payment.Provider.CASH,
@@ -110,10 +136,16 @@ class OrderCheckoutSerializer(serializers.Serializer):
     )
 
     def validate_address_id(self, value: CustomerAddress) -> CustomerAddress:
-        request = self.context["request"]
-        if not request.user.is_staff and value.user != request.user:
-            raise serializers.ValidationError("You can only use your own address.")
+        return _validate_order_address_owner(self, value)
+
+    def validate_payment_method(self, value: str) -> str:
+        enabled_methods = set(getattr(settings, "ENABLED_CHECKOUT_PAYMENT_METHODS", ["CASH"]))
+        if value not in enabled_methods:
+            raise serializers.ValidationError("This payment method is not enabled for checkout.")
         return value
+
+    def validate_coupon_code(self, value: str) -> str:
+        return value.strip().upper()
 
 
 class OrderStatusTransitionSerializer(serializers.Serializer):
@@ -135,3 +167,12 @@ class OrderWriteSerializer(serializers.ModelSerializer):
             "description",
             "address_id",
         )
+
+    def validate_address_id(self, value: CustomerAddress) -> CustomerAddress:
+        return _validate_order_address_owner(self, value)
+
+    def validate_status(self, value: str) -> str:
+        request = self.context["request"]
+        if not user_is_tenant_staff(request.user, getattr(request, "tenant", None)):
+            raise serializers.ValidationError("Only tenant staff can set order status directly.")
+        return value

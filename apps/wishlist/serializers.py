@@ -37,8 +37,8 @@ class WishlistItemWriteSerializer(serializers.ModelSerializer):
 
 
 class WishlistReadSerializer(serializers.ModelSerializer):
-    items = WishlistItemReadSerializer(many=True, read_only=True)
-    total_items = serializers.ReadOnlyField()
+    items = serializers.SerializerMethodField()
+    total_items = serializers.SerializerMethodField()
 
     class Meta:
         model = Wishlist
@@ -51,6 +51,24 @@ class WishlistReadSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+    def _tenant_items(self, obj):
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None)
+        queryset = obj.items.select_related("product", "product__category")
+        if tenant is not None:
+            queryset = queryset.filter(product__tenant=tenant)
+        return queryset
+
+    def get_items(self, obj):
+        return WishlistItemReadSerializer(
+            self._tenant_items(obj),
+            many=True,
+            context=self.context,
+        ).data
+
+    def get_total_items(self, obj):
+        return self._tenant_items(obj).count()
 
 
 class WishlistWriteSerializer(serializers.ModelSerializer):

@@ -10,6 +10,10 @@ TENANT_HEADER = "HTTP_X_TENANT_SLUG"
 TENANT_QUERY_PARAM = "tenant"
 
 
+class TenantResolutionError(Exception):
+    pass
+
+
 def resolve_tenant_from_request(request) -> Tenant:
     query_params = getattr(request, "query_params", None)
     headers = getattr(request, "headers", {})
@@ -25,6 +29,7 @@ def resolve_tenant_from_request(request) -> Tenant:
         tenant = Tenant.objects.filter(slug=slug, is_active=True).first()
         if tenant:
             return tenant
+        raise TenantResolutionError("Tenant not found.")
 
     if request.user.is_authenticated:
         membership = (

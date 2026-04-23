@@ -3,6 +3,7 @@ from typing import cast
 from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework import permissions, status, viewsets
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 
@@ -146,18 +147,12 @@ class NewsletterSubscribeViewSet(viewsets.ViewSet):
         token = (request.query_params.get("token") or "").strip()
 
         if not token:
-            return Response(
-                {"detail": "Missing confirmation token."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Missing confirmation token."})
 
         try:
             subscriber = NewsletterSubscriber.objects.get(confirmation_token=token)
         except NewsletterSubscriber.DoesNotExist:
-            return Response(
-                {"detail": "Invalid or expired confirmation link."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise NotFound("Invalid or expired confirmation link.")
 
         if not subscriber.is_confirmed:
             subscriber.is_confirmed = True
@@ -188,10 +183,7 @@ class NewsletterSubscribeViewSet(viewsets.ViewSet):
                 tenant=tenant,
             )
         except NewsletterSubscriber.DoesNotExist:
-            return Response(
-                {"detail": "This email is not subscribed."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise NotFound("This email is not subscribed.")
 
         if not subscriber.is_active:
             return Response(

@@ -6,16 +6,44 @@ from decimal import Decimal
 import requests
 from django.conf import settings
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
 
 from apps.cart.models import CartItem
+from apps.promotions.services import calculate_coupon_discount, get_valid_coupon
 from .models import Payment
 
 logger = logging.getLogger(__name__)
 
+REQUIRED_MOMO_SETTINGS = (
+    "SUBSCRIPTION_KEY",
+    "MOMO_API_USER",
+    "MOMO_API_KEY",
+    "MOMO_BASE_URL",
+)
+
+
+class PaymentProviderUnavailable(APIException):
+    status_code = 503
+    default_detail = "Payment provider is temporarily unavailable."
+    default_code = "payment_provider_unavailable"
+
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
+
+
+def validate_momo_configuration() -> None:
+    if not getattr(settings, "ENABLE_MOMO", False):
+        raise ValidationError({"detail": "Mobile money payments are not enabled."})
+
+    missing = [name for name in REQUIRED_MOMO_SETTINGS if not getattr(settings, name, "")]
+    if missing:
+        raise ValidationError(
+            {
+                "detail": "Mobile money payments are not configured.",
+                "missing_settings": missing,
+            }
+        )
 
 
 def momo_headers(
@@ -38,6 +66,7 @@ def momo_headers(
 
 
 def create_access_token() -> str:
+    validate_momo_configuration()
     url = f"{settings.MOMO_BASE_URL}/collection/token/"
     auth = requests.auth.HTTPBasicAuth(
         settings.MOMO_API_USER,
@@ -47,8 +76,12 @@ def create_access_token() -> str:
         "Ocp-Apim-Subscription-Key": settings.SUBSCRIPTION_KEY,
     }
 
-    res = requests.post(url, headers=headers, auth=auth, timeout=30)
-    res.raise_for_status()
+    try:
+        res = requests.post(url, headers=headers, auth=auth, timeout=30)
+        res.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("MTN token request failed error=%s", exc)
+        raise PaymentProviderUnavailable() from exc
 
     token = res.json().get("access_token")
     if not token:
@@ -84,7 +117,11 @@ def request_to_pay(
         "payeeNote": "Thank you for using GoCart",
     }
 
-    res = requests.post(url, json=body, headers=headers, timeout=30)
+    try:
+        res = requests.post(url, json=body, headers=headers, timeout=30)
+    except requests.RequestException as exc:
+        logger.warning("MTN request_to_pay failed reference_id=%s error=%s", transaction_id, exc)
+        raise PaymentProviderUnavailable() from exc
 
     data = {}
     try:
@@ -92,11 +129,12 @@ def request_to_pay(
     except Exception:
         data = {"raw": res.text}
 
-    logger.warning(
-        "MTN request_to_pay status=%s reference_id=%s response=%s",
+    log_func = logger.info if res.status_code == 202 else logger.warning
+    log_func(
+        "MTN request_to_pay status=%s reference_id=%s provider_status=%s",
         res.status_code,
         transaction_id,
-        data,
+        data.get("status") if isinstance(data, dict) else "",
     )
 
     return {
@@ -107,21 +145,101 @@ def request_to_pay(
 
 
 def get_user_cart_total(user, tenant=None) -> Decimal:
-    cart_items = CartItem.objects.select_related("variant").filter(cart__user=user)
+    return get_cart_total_from_items(get_user_cart_items(user=user, tenant=tenant))
+
+
+def get_user_cart_items(*, user, tenant=None) -> list[CartItem]:
+    cart_items = CartItem.objects.select_related("variant", "variant__product").filter(cart__user=user)
 
     if tenant is not None:
         cart_items = cart_items.filter(variant__tenant=tenant)
 
-    total = Decimal("0.00")
-    for item in cart_items:
-        unit_price = (
-            item.variant.price
-            if item.variant and item.variant.price
-            else Decimal("0.00")
-        )
-        total += unit_price * item.quantity
+    return list(cart_items)
 
-    return total
+
+def get_cart_total_from_items(cart_items: list[CartItem]) -> Decimal:
+    return sum((item.line_total for item in cart_items), Decimal("0.00"))
+
+
+def validate_coupon_for_cart_items(*, coupon, cart_items: list[CartItem]) -> None:
+    if not coupon.products.exists() and not coupon.categories.exists():
+        return
+
+    cart_product_ids = {item.variant.product_id for item in cart_items}
+    cart_category_ids = {item.variant.product.category_id for item in cart_items}
+    coupon_product_ids = set(coupon.products.values_list("id", flat=True))
+    coupon_category_ids = set(coupon.categories.values_list("id", flat=True))
+
+    if not (cart_product_ids & coupon_product_ids) and not (cart_category_ids & coupon_category_ids):
+        raise ValidationError("Coupon does not apply to this cart.")
+
+
+def build_checkout_summary(
+    *,
+    cart_items: list[CartItem],
+    tenant=None,
+    shipping_method=None,
+    coupon_code: str = "",
+) -> dict:
+    items_subtotal = get_cart_total_from_items(cart_items)
+    discount = Decimal("0.00")
+    coupon = None
+
+    if coupon_code:
+        coupon = get_valid_coupon(code=coupon_code, tenant=tenant)
+        validate_coupon_for_cart_items(coupon=coupon, cart_items=cart_items)
+        discount = calculate_coupon_discount(coupon=coupon, amount=items_subtotal)
+
+    shipping = shipping_method.fee if shipping_method is not None else Decimal("0.00")
+    total = max(items_subtotal - discount, Decimal("0.00")) + shipping
+
+    return {
+        "items_subtotal": items_subtotal,
+        "discount": discount,
+        "shipping": shipping,
+        "total": total,
+        "coupon": coupon,
+        "coupon_id": coupon.id if coupon is not None else None,
+        "coupon_code": coupon.code if coupon is not None else "",
+        "shipping_method_id": shipping_method.id if shipping_method is not None else None,
+    }
+
+
+def serialize_checkout_summary(summary: dict) -> dict:
+    return {
+        "items_subtotal": str(summary["items_subtotal"]),
+        "discount": str(summary["discount"]),
+        "shipping": str(summary["shipping"]),
+        "total": str(summary["total"]),
+        "coupon_id": summary["coupon_id"],
+        "coupon_code": summary["coupon_code"],
+        "shipping_method_id": summary["shipping_method_id"],
+    }
+
+
+def get_expected_total_from_payment_summary(*, cart_items: list[CartItem], payment: Payment) -> Decimal:
+    checkout_summary = payment.provider_response.get("checkout_summary") or {}
+    if not checkout_summary:
+        return get_cart_total_from_items(cart_items)
+
+    items_subtotal = Decimal(str(checkout_summary.get("items_subtotal", "0.00")))
+    if get_cart_total_from_items(cart_items) != items_subtotal:
+        return Decimal("-1.00")
+
+    discount = Decimal(str(checkout_summary.get("discount", "0.00")))
+    shipping = Decimal(str(checkout_summary.get("shipping", "0.00")))
+    return max(items_subtotal - discount, Decimal("0.00")) + shipping
+
+
+def build_cart_snapshot(cart_items: list[CartItem]) -> list[dict]:
+    return [
+        {
+            "variant_id": item.variant_id,
+            "quantity": item.quantity,
+            "unit_price": str(item.unit_price),
+        }
+        for item in sorted(cart_items, key=lambda cart_item: cart_item.variant_id)
+    ]
 
 
 def user_has_cart_items(user, tenant=None) -> bool:
@@ -140,8 +258,23 @@ def initiate_mtn_payment(
     phone_number: str,
     address,
     tenant=None,
+    shipping_method=None,
+    coupon_code: str = "",
+    idempotency_key: str = "",
 ) -> Payment:
-    amount = get_user_cart_total(user, tenant)
+    validate_momo_configuration()
+    cart_items = get_user_cart_items(user=user, tenant=tenant)
+    if get_cart_total_from_items(cart_items) <= Decimal("0.00"):
+        raise ValidationError({"detail": "Your cart is empty."})
+    checkout_summary = build_checkout_summary(
+        cart_items=cart_items,
+        tenant=tenant,
+        shipping_method=shipping_method,
+        coupon_code=coupon_code,
+    )
+    amount = checkout_summary["total"]
+    cart_snapshot = build_cart_snapshot(cart_items)
+    serialized_summary = serialize_checkout_summary(checkout_summary)
 
     payment = Payment.objects.create(
         tenant=tenant,
@@ -154,6 +287,10 @@ def initiate_mtn_payment(
         status=Payment.Status.PENDING,
         provider_response={
             "address_id": address.id,
+            "idempotency_key": idempotency_key,
+            "cart_snapshot": cart_snapshot,
+            "cart_total": str(checkout_summary["items_subtotal"]),
+            "checkout_summary": serialized_summary,
         },
     )
 
@@ -170,6 +307,10 @@ def initiate_mtn_payment(
         "initiate": result["data"],
         "initiate_status_code": result["status_code"],
         "address_id": address.id,
+        "idempotency_key": idempotency_key,
+        "cart_snapshot": cart_snapshot,
+        "cart_total": str(checkout_summary["items_subtotal"]),
+        "checkout_summary": serialized_summary,
     }
 
     if result["status_code"] == 202:
@@ -208,18 +349,23 @@ def check_status(reference_id: str) -> dict:
     url = f"{settings.MOMO_BASE_URL}/collection/v1_0/requesttopay/{reference_id}"
     headers = momo_headers(settings.SUBSCRIPTION_KEY, token=access_token)
 
-    res = requests.get(url, headers=headers, timeout=30)
+    try:
+        res = requests.get(url, headers=headers, timeout=30)
+    except requests.RequestException as exc:
+        logger.warning("MTN check_status failed reference_id=%s error=%s", reference_id, exc)
+        raise PaymentProviderUnavailable() from exc
 
     try:
         data = res.json() if res.content else {}
     except Exception:
         data = {"raw": res.text}
 
-    logger.warning(
-        "MTN check_status http_status=%s reference_id=%s response=%s",
+    log_func = logger.info if res.status_code < 400 else logger.warning
+    log_func(
+        "MTN check_status http_status=%s reference_id=%s provider_status=%s",
         res.status_code,
         reference_id,
-        data,
+        data.get("status") if isinstance(data, dict) else "",
     )
 
     return {

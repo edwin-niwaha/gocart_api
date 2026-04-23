@@ -2,6 +2,8 @@ from django.contrib.auth import authenticate, get_user_model, password_validatio
 from django.db import transaction
 from rest_framework import serializers
 
+from apps.tenants.models import TenantMembership
+from apps.tenants.permissions import is_platform_admin, user_has_tenant_role
 from apps.tenants.serializers import TenantMembershipSerializer
 
 User = get_user_model()
@@ -13,7 +15,7 @@ def normalize_email(value: str) -> str:
 
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
-    tenant_memberships = TenantMembershipSerializer(many=True, read_only=True)
+    tenant_memberships = serializers.SerializerMethodField()
     active_tenant_slug = serializers.SerializerMethodField()
 
     class Meta:
@@ -47,8 +49,46 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
     def get_active_tenant_slug(self, obj):
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None)
+        if tenant and obj.tenant_memberships.filter(tenant=tenant, is_active=True).exists():
+            return tenant.slug
+
         tenant = getattr(obj, "active_tenant", None)
         return tenant.slug if tenant else None
+
+    def get_tenant_memberships(self, obj):
+        request = self.context.get("request")
+        if request is None:
+            return TenantMembershipSerializer(
+                obj.tenant_memberships.select_related("tenant").filter(is_active=True),
+                many=True,
+                context=self.context,
+            ).data
+
+        tenant = getattr(request, "tenant", None)
+        request_user = getattr(request, "user", None)
+        queryset = obj.tenant_memberships.select_related("tenant").filter(is_active=True)
+
+        if is_platform_admin(request_user):
+            memberships = queryset
+        elif (
+            tenant is not None
+            and getattr(request_user, "is_authenticated", False)
+            and (
+                obj.pk == request_user.pk
+                or user_has_tenant_role(request_user, tenant, TenantMembership.Role.STAFF)
+            )
+        ):
+            memberships = queryset.filter(tenant=tenant)
+        else:
+            memberships = queryset.none()
+
+        return TenantMembershipSerializer(
+            memberships,
+            many=True,
+            context=self.context,
+        ).data
 
     def get_avatar_url(self, obj):
         if not obj.avatar:

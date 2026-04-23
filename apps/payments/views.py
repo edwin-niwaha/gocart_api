@@ -2,38 +2,52 @@ import logging
 
 from django.db import transaction
 from rest_framework import status
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.addresses.models import CustomerAddress
-from apps.cart.models import CartItem
-from apps.orders.models import Order
+from apps.cart.models import Cart, CartItem
+from apps.orders.models import Order, OrderStatusEvent
 from apps.orders.serializers import OrderReadSerializer
 from apps.orders.services import add_order_item, create_order
-from rest_framework import generics, status
+from apps.promotions.models import Coupon
+from apps.promotions.services import increment_coupon_usage
+from rest_framework import generics
 
 from .models import Payment
 from .serializers import MTNInitiatePaymentSerializer, PaymentStatusSerializer, PaymentListSerializer
 from .services import (
+    build_cart_snapshot,
+    get_expected_total_from_payment_summary,
+    get_cart_total_from_items,
     initiate_mtn_payment,
     refresh_mtn_payment_status,
     user_has_cart_items,
 )
+from apps.orders.views import get_idempotency_key
 
 logger = logging.getLogger(__name__)
 
 
 def _get_cart_items_for_user(user, tenant):
+    cart = Cart.objects.select_for_update().filter(user=user).first()
+    if cart is None:
+        return []
+
     return list(
-        CartItem.objects.select_related(
+        CartItem.objects.select_for_update()
+        .select_related(
             "cart",
             "variant",
             "variant__product",
-        ).filter(
-            cart__user=user,
+        )
+        .filter(
+            cart=cart,
             variant__tenant=tenant,
         )
+        .order_by("id")
     )
 
 
@@ -41,6 +55,30 @@ class MTNInitiatePaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        idempotency_key = get_idempotency_key(request)
+        if idempotency_key:
+            existing_payment = (
+                Payment.objects.filter(
+                    tenant=request.tenant,
+                    user=request.user,
+                    provider=Payment.Provider.MTN,
+                    provider_response__idempotency_key=idempotency_key,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if existing_payment is not None:
+                return Response(
+                    {
+                        "reference": existing_payment.reference,
+                        "external_id": existing_payment.external_id,
+                        "status": existing_payment.status,
+                        "amount": existing_payment.amount,
+                        "currency": existing_payment.currency,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
         serializer = MTNInitiatePaymentSerializer(
             data=request.data,
             context={"request": request},
@@ -48,13 +86,12 @@ class MTNInitiatePaymentView(APIView):
         serializer.is_valid(raise_exception=True)
 
         if not user_has_cart_items(request.user, request.tenant):
-            return Response(
-                {"detail": "Your cart is empty."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError({"detail": "Your cart is empty."})
 
         address = serializer.context["address_instance"]
         phone_number = serializer.validated_data["phone_number"]
+        shipping_method = serializer.validated_data.get("shipping_method")
+        coupon_code = serializer.validated_data.get("coupon_code", "")
         order = None  # DO NOT create order yet
 
         payment = initiate_mtn_payment(
@@ -63,6 +100,17 @@ class MTNInitiatePaymentView(APIView):
             phone_number=phone_number,
             address=address,
             tenant=request.tenant,
+            shipping_method=shipping_method,
+            coupon_code=coupon_code,
+            idempotency_key=idempotency_key,
+        )
+        logger.info(
+            "MTN payment initiated payment_id=%s user_id=%s tenant_id=%s amount=%s request_id=%s",
+            payment.id,
+            request.user.id,
+            getattr(request.tenant, "id", None),
+            payment.amount,
+            getattr(request, "id", ""),
         )
 
         return Response(
@@ -88,10 +136,7 @@ class PaymentStatusView(APIView):
                 tenant=request.tenant,
             )
         except Payment.DoesNotExist:
-            return Response(
-                {"detail": "Payment not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise NotFound("Payment not found.")
 
         if payment.provider == Payment.Provider.MTN:
             payment = refresh_mtn_payment_status(payment)
@@ -118,32 +163,58 @@ class FinalizePaidOrderView(APIView):
                     )
                 )
             except Payment.DoesNotExist:
-                return Response(
-                    {"detail": "Payment not found."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                raise NotFound("Payment not found.")
 
             if payment.provider == Payment.Provider.MTN:
                 payment = refresh_mtn_payment_status(payment)
 
             if payment.status == Payment.Status.PROCESSING:
-                return Response(
+                raise ValidationError(
                     {
                         "detail": "Payment is still being confirmed. Please try again in a moment."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                    }
                 )
 
             if payment.status != Payment.Status.PAID:
-                return Response(
+                raise ValidationError(
                     {
                         "detail": f"Payment is not successful. Current status: {payment.status}."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                    }
                 )
 
-            if payment.order is not None and payment.order.status == Order.Status.PAID:
-                output = OrderReadSerializer(payment.order, context={"request": request})
+            if payment.order is not None:
+                order = payment.order
+                final_statuses = {
+                    Order.Status.PAID,
+                    Order.Status.SHIPPED,
+                    Order.Status.DELIVERED,
+                    Order.Status.REFUNDED,
+                    Order.Status.CANCELLED,
+                }
+
+                if order.status not in final_statuses:
+                    previous_status = order.status
+                    order.status = Order.Status.PAID
+                    order.save(update_fields=["status", "updated_at"])
+                    OrderStatusEvent.objects.create(
+                        tenant=order.tenant,
+                        order=order,
+                        changed_by=request.user,
+                        from_status=previous_status,
+                        to_status=Order.Status.PAID,
+                        note=f"Payment {payment.reference} finalized",
+                    )
+                    logger.info(
+                        "Paid payment synchronized existing order order_id=%s payment_id=%s from_status=%s user_id=%s tenant_id=%s request_id=%s",
+                        order.id,
+                        payment.id,
+                        previous_status,
+                        request.user.id,
+                        getattr(request.tenant, "id", None),
+                        getattr(request, "id", ""),
+                    )
+
+                output = OrderReadSerializer(order, context={"request": request})
                 return Response(
                     {"order": output.data, "payment_reference": payment.reference},
                     status=status.HTTP_200_OK,
@@ -151,10 +222,7 @@ class FinalizePaidOrderView(APIView):
 
             address_id = payment.provider_response.get("address_id")
             if not address_id:
-                return Response(
-                    {"detail": "Address information missing from payment."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                raise ValidationError({"detail": "Address information missing from payment."})
 
             try:
                 address = CustomerAddress.objects.get(
@@ -162,12 +230,64 @@ class FinalizePaidOrderView(APIView):
                     user=request.user,
                 )
             except CustomerAddress.DoesNotExist:
-                return Response(
-                    {"detail": "Address not found."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                raise ValidationError({"detail": "Address not found."})
+
+            cart_items = _get_cart_items_for_user(request.user, request.tenant)
+            if not cart_items:
+                raise ValidationError({"detail": "Cart is empty."})
+
+            expected_payment_total = get_expected_total_from_payment_summary(
+                cart_items=cart_items,
+                payment=payment,
+            )
+            if expected_payment_total != payment.amount:
+                logger.warning(
+                    "Payment finalization blocked due to amount mismatch payment_id=%s user_id=%s paid_amount=%s expected_total=%s request_id=%s",
+                    payment.id,
+                    request.user.id,
+                    payment.amount,
+                    expected_payment_total,
+                    getattr(request, "id", ""),
+                )
+                raise ValidationError(
+                    {
+                        "detail": "Your cart changed after payment was initiated. Please start a new payment."
+                    }
                 )
 
-            # ALWAYS create order here after successful payment
+            expected_snapshot = payment.provider_response.get("cart_snapshot")
+            if expected_snapshot and expected_snapshot != build_cart_snapshot(cart_items):
+                logger.warning(
+                    "Payment finalization blocked due to cart snapshot mismatch payment_id=%s user_id=%s request_id=%s",
+                    payment.id,
+                    request.user.id,
+                    getattr(request, "id", ""),
+                )
+                raise ValidationError(
+                    {
+                        "detail": "Your cart changed after payment was initiated. Please start a new payment."
+                    }
+                )
+
+            locked_variants = {}
+            for cart_item in cart_items:
+                variant = (
+                    cart_item.variant.__class__.objects.select_related("product")
+                    .select_for_update()
+                    .get(id=cart_item.variant.id, tenant=request.tenant)
+                )
+                quantity = cart_item.quantity
+
+                if variant.stock_quantity < quantity:
+                    raise ValidationError(
+                        {
+                            "detail": f"Insufficient stock for {variant.product.title} ({variant.name})"
+                        }
+                    )
+
+                locked_variants[cart_item.id] = variant
+
+            # ALWAYS create order here after successful payment and cart verification.
             order = create_order(
                 user=request.user,
                 tenant=request.tenant,
@@ -178,49 +298,44 @@ class FinalizePaidOrderView(APIView):
 
             payment.order = order
 
-            cart_items = _get_cart_items_for_user(request.user, request.tenant)
-            if not cart_items:
-                if order.status == Order.Status.PAID:
-                    output = OrderReadSerializer(order, context={"request": request})
-                    return Response(
-                        {"order": output.data, "payment_reference": payment.reference},
-                        status=status.HTTP_200_OK,
-                    )
-
-                return Response(
-                    {"detail": "Cart is empty."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
             for cart_item in cart_items:
-                variant = (
-                    cart_item.variant.__class__.objects.select_for_update().get(
-                        id=cart_item.variant.id
-                    )
-                )
+                variant = locked_variants[cart_item.id]
                 quantity = cart_item.quantity
-
-                if variant.stock_quantity < quantity:
-                    return Response(
-                        {
-                            "detail": f"Insufficient stock for {variant.product.title} ({variant.name})"
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
 
                 variant.stock_quantity -= quantity
                 variant.save(update_fields=["stock_quantity"])
-                add_order_item(order=order, variant=variant, quantity=quantity)
+                add_order_item(
+                    order=order,
+                    variant=variant,
+                    quantity=quantity,
+                    unit_price=cart_item.unit_price,
+                )
 
             order.recalculate_total_price()
+            order.total_price = payment.amount
             order.status = Order.Status.PAID
-            order.save(update_fields=["status", "updated_at"])
+            order.save(update_fields=["total_price", "status", "updated_at"])
 
             CartItem.objects.filter(id__in=[item.id for item in cart_items]).delete()
+
+            checkout_summary = payment.provider_response.get("checkout_summary") or {}
+            coupon_id = checkout_summary.get("coupon_id")
+            if coupon_id:
+                coupon = Coupon.objects.filter(id=coupon_id, tenant=request.tenant).first()
+                if coupon is not None:
+                    increment_coupon_usage(coupon=coupon)
 
             payment.tenant = request.tenant
             payment.amount = order.total_price
             payment.save(update_fields=["order", "amount", "tenant", "updated_at"])
+            logger.info(
+                "Payment finalized order_id=%s payment_id=%s user_id=%s tenant_id=%s request_id=%s",
+                order.id,
+                payment.id,
+                request.user.id,
+                getattr(request.tenant, "id", None),
+                getattr(request, "id", ""),
+            )
 
             output = OrderReadSerializer(order, context={"request": request})
             return Response(

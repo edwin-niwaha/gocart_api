@@ -1,8 +1,14 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.common.models import AuditLog, SupportMessage
+from apps.common.models import AuditLog, NewsletterSubscriber, SupportMessage
+from apps.common.tasks import (
+    send_contact_email_task,
+    send_newsletter_confirmation_request_task,
+    send_newsletter_subscription_confirmed_task,
+)
 from apps.tenants.models import Tenant, TenantMembership
 
 User = get_user_model()
@@ -42,6 +48,58 @@ class SupportMessageTests(TestCase):
         support.refresh_from_db()
         self.assertEqual(support.status, SupportMessage.Status.RESOLVED)
         self.assertIsNotNone(support.resolved_at)
+
+
+class CeleryConfigurationTests(TestCase):
+    def test_worker_reliability_settings_are_enabled(self):
+        self.assertTrue(settings.CELERY_TASK_ACKS_LATE)
+        self.assertTrue(settings.CELERY_TASK_REJECT_ON_WORKER_LOST)
+        self.assertEqual(settings.CELERY_WORKER_PREFETCH_MULTIPLIER, 1)
+        self.assertTrue(settings.CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP)
+
+
+class CommonTaskReliabilityTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(name="Task Tenant", slug="task-tenant", is_active=True, is_default=True)
+
+    def test_common_email_tasks_have_retry_policy(self):
+        for task, max_retries in (
+            (send_contact_email_task, 3),
+            (send_newsletter_confirmation_request_task, 3),
+            (send_newsletter_subscription_confirmed_task, 3),
+        ):
+            self.assertEqual(task.autoretry_for, (Exception,))
+            self.assertTrue(task.retry_backoff)
+            self.assertTrue(task.retry_jitter)
+            self.assertEqual(task.retry_backoff_max, 300)
+            self.assertEqual(task.max_retries, max_retries)
+
+    @override_settings(ENABLE_EMAIL=False, DEFAULT_FROM_EMAIL="")
+    def test_contact_email_task_skips_when_email_disabled(self):
+        result = send_contact_email_task.apply(
+            args=("Edwin", "edwin@example.com", "Need help"),
+        ).get()
+
+        self.assertEqual(result, {"success": False, "reason": "email disabled"})
+
+    @override_settings(ENABLE_EMAIL=False, DEFAULT_FROM_EMAIL="")
+    def test_newsletter_tasks_skip_when_email_disabled(self):
+        subscriber = NewsletterSubscriber.objects.create(
+            email="subscriber@example.com",
+            tenant=self.tenant,
+        )
+
+        confirmation_result = send_newsletter_confirmation_request_task.apply(args=(subscriber.id,)).get()
+        confirmed_result = send_newsletter_subscription_confirmed_task.apply(args=(subscriber.id,)).get()
+
+        self.assertEqual(confirmation_result, {"success": False, "reason": "email disabled"})
+        self.assertEqual(confirmed_result, {"success": False, "reason": "email disabled"})
+
+    @override_settings(ENABLE_EMAIL=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_newsletter_confirmation_skips_missing_subscriber_without_retry(self):
+        result = send_newsletter_confirmation_request_task.apply(args=(999999,)).get()
+
+        self.assertEqual(result, {"success": False, "reason": "subscriber missing"})
 
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase

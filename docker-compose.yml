@@ -20,9 +20,9 @@ services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_DB: gocart
-      POSTGRES_USER: gocart
-      POSTGRES_PASSWORD: gocart
+      POSTGRES_DB: ${POSTGRES_DB:-gocart}
+      POSTGRES_USER: ${POSTGRES_USER:-gocart}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     ports:
       - "5432:5432"
     volumes:
