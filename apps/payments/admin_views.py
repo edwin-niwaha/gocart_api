@@ -78,6 +78,8 @@ class AdminPaymentListView(generics.ListAPIView):
                 | Q(external_id__icontains=search)
                 | Q(phone_number__icontains=search)
                 | Q(order__slug__icontains=search)
+                | Q(order__customer_email__icontains=search)
+                | Q(order__customer_name__icontains=search)
                 | Q(user__email__icontains=search)
                 | Q(user__username__icontains=search)
                 | Q(tenant__name__icontains=search)

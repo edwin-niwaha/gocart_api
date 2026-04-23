@@ -122,7 +122,7 @@ class PaymentStatusSerializer(serializers.ModelSerializer):
 
 
 class PaymentListSerializer(serializers.ModelSerializer):
-    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_email = serializers.SerializerMethodField()
     order_slug = serializers.CharField(source="order.slug", read_only=True)
 
     class Meta:
@@ -149,11 +149,14 @@ class PaymentListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_user_email(self, obj):
+        return getattr(obj.user, "email", None) or getattr(obj.order, "customer_email", None)
+
 
 
 class AdminPaymentSerializer(serializers.ModelSerializer):
-    user_email = serializers.EmailField(source="user.email", read_only=True)
-    username = serializers.CharField(source="user.username", read_only=True)
+    user_email = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
     order_slug = serializers.CharField(source="order.slug", read_only=True)
     order_status = serializers.CharField(source="order.status", read_only=True)
     tenant_name = serializers.CharField(source="tenant.name", read_only=True)
@@ -210,6 +213,12 @@ class AdminPaymentSerializer(serializers.ModelSerializer):
 
     def get_address_id(self, obj):
         return obj.provider_response.get("address_id") if obj.provider_response else None
+
+    def get_user_email(self, obj):
+        return getattr(obj.user, "email", None) or getattr(obj.order, "customer_email", None)
+
+    def get_username(self, obj):
+        return getattr(obj.user, "username", None) or getattr(obj.order, "customer_name", None)
 
     def validate_provider(self, value):
         allowed = {choice[0] for choice in Payment.Provider.choices}

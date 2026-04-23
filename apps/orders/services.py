@@ -24,17 +24,67 @@ ALLOWED_STATUS_TRANSITIONS = {
 }
 
 
-def generate_order_slug(*, user, prefix: str = "order") -> str:
-    return f"{slugify(prefix)}-{user.id}-{uuid4().hex[:8]}"
+def generate_order_slug(*, user=None, prefix: str = "order") -> str:
+    owner_token = getattr(user, "id", None) or "guest"
+    return f"{slugify(prefix)}-{owner_token}-{uuid4().hex[:8]}"
+
+
+def _populate_order_snapshot(*, user=None, validated_data: dict) -> None:
+    address = validated_data.get("address")
+    customer_name = (validated_data.get("customer_name") or "").strip()
+    customer_email = (validated_data.get("customer_email") or "").strip().lower()
+    customer_phone = (validated_data.get("customer_phone") or "").strip()
+
+    if user is not None:
+        default_name = user.get_full_name().strip() or user.email or user.username
+        if not customer_name:
+            customer_name = default_name
+        if not customer_email:
+            customer_email = user.email
+
+    validated_data["customer_name"] = customer_name
+    validated_data["customer_email"] = customer_email
+    validated_data["customer_phone"] = customer_phone or getattr(address, "phone_number", "")
+    validated_data["address_street_name"] = (
+        validated_data.get("address_street_name")
+        or getattr(address, "street_name", "")
+    )
+    validated_data["address_city"] = (
+        validated_data.get("address_city")
+        or getattr(address, "city", "")
+    )
+    validated_data["address_region"] = (
+        validated_data.get("address_region")
+        or getattr(address, "region", "")
+    )
+    validated_data["address_additional_information"] = (
+        validated_data.get("address_additional_information")
+        or getattr(address, "additional_information", "")
+    )
 
 
 @transaction.atomic
-def create_order(*, user, tenant: Tenant, **validated_data) -> Order:
+def create_order(*, user=None, tenant: Tenant, **validated_data) -> Order:
     if not validated_data.get("slug"):
         validated_data["slug"] = generate_order_slug(user=user)
+    _populate_order_snapshot(user=user, validated_data=validated_data)
     order = Order.objects.create(user=user, tenant=tenant, **validated_data)
-    OrderStatusEvent.objects.create(tenant=tenant, order=order, changed_by=user, from_status="", to_status=order.status, note="Order created")
-    create_audit_log(tenant=tenant, actor=user, action="order.created", summary=f"Order {order.slug} created", target=order)
+    actor = user if getattr(user, "is_authenticated", False) else None
+    OrderStatusEvent.objects.create(
+        tenant=tenant,
+        order=order,
+        changed_by=actor,
+        from_status="",
+        to_status=order.status,
+        note="Order created",
+    )
+    create_audit_log(
+        tenant=tenant,
+        actor=actor,
+        action="order.created",
+        summary=f"Order {order.slug} created",
+        target=order,
+    )
     return order
 
 

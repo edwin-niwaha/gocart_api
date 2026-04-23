@@ -219,3 +219,43 @@ def send_password_reset_email(*, user, code: str) -> None:
             "It expires in 10 minutes."
         ),
     )
+
+
+@transaction.atomic
+def claim_guest_session_data(*, user, guest_session_key: str | None) -> dict[str, int]:
+    if not guest_session_key:
+        return {
+            "claimed_cart_items": 0,
+            "merged_cart_items": 0,
+            "claimed_orders": 0,
+            "claimed_payments": 0,
+        }
+
+    from apps.cart.services import claim_guest_cart
+    from apps.orders.models import Order
+    from apps.payments.models import Payment
+
+    timestamp = timezone.now()
+    cart_result = claim_guest_cart(user=user, guest_session_key=guest_session_key)
+    claimed_orders = Order.objects.filter(
+        user__isnull=True,
+        guest_session_key=guest_session_key,
+    ).update(
+        user=user,
+        guest_session_key=None,
+        updated_at=timestamp,
+    )
+    claimed_payments = Payment.objects.filter(
+        user__isnull=True,
+        guest_session_key=guest_session_key,
+    ).update(
+        user=user,
+        guest_session_key=None,
+        updated_at=timestamp,
+    )
+    return {
+        "claimed_cart_items": cart_result["claimed_items"],
+        "merged_cart_items": cart_result["merged_items"],
+        "claimed_orders": claimed_orders,
+        "claimed_payments": claimed_payments,
+    }

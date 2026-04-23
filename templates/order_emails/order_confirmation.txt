@@ -9,8 +9,8 @@ Status: {{ order.get_status_display }}
 Total: {{ order.total_price }}
 
 Delivery Address:
-{{ order.address.street_name }}
-{{ order.address.city }}
+{{ delivery_street_name }}
+{{ delivery_city }}{% if delivery_region %}, {{ delivery_region }}{% endif %}
 
 Items:
 {% for item in items %}

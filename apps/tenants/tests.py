@@ -10,7 +10,7 @@ User = get_user_model()
 class TenantApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.tenant = Tenant.objects.create(name="JobellInc", slug="jobellinc", is_active=True, is_default=True)
+        self.tenant = Tenant.objects.create(name="GoCart", slug="GoCart", is_active=True, is_default=True)
 
     def test_current_tenant_endpoint_uses_header(self):
         alt = Tenant.objects.create(name="Alt", slug="alt", is_active=True)
@@ -103,12 +103,12 @@ class TenantApiTests(TestCase):
 
         response = self.client.patch(
             "/api/v1/tenants/current/branding/",
-            {"app_name": "Jobell Store", "primary_color": "#112233", "hero_title": "Shop faster"},
+            {"app_name": "GoCart", "primary_color": "#112233", "hero_title": "Shop faster"},
             format="json",
             HTTP_X_TENANT_SLUG=self.tenant.slug,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["app_name"], "Jobell Store")
+        self.assertEqual(response.data["app_name"], "GoCart")
 
         response = self.client.patch(
             "/api/v1/tenants/current/settings/",

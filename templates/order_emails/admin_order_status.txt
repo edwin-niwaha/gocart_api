@@ -1,6 +1,6 @@
 Order {{ order.slug }} changed status to {{ status_label }}.
 
-Customer: {{ user.email }}
+Customer: {{ customer_email }}
 Total: {{ order.total_price }}
 
 Items:

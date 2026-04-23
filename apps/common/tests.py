@@ -18,7 +18,7 @@ User = get_user_model()
 class SupportMessageTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.tenant = Tenant.objects.create(name="JobellInc", slug="jobellinc", is_active=True, is_default=True)
+        self.tenant = Tenant.objects.create(name="GoCart", slug="GoCart", is_active=True, is_default=True)
 
     def test_contact_submission_creates_support_message(self):
         response = self.client.post(

@@ -12,6 +12,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from apps.cart.models import Cart, CartItem
+from apps.common.guest_sessions import get_request_guest_session_key
 from apps.payments.models import Payment
 from apps.promotions.services import apply_coupon_to_order, increment_coupon_usage
 from apps.tenants.permissions import IsTenantStaff
@@ -53,45 +54,91 @@ def build_checkout_response(*, order: Order, payment: Payment, request, status_c
     )
 
 
-def get_existing_checkout_payment(*, request, tenant, idempotency_key: str):
+def get_existing_checkout_payment(
+    *,
+    request,
+    tenant,
+    idempotency_key: str,
+    guest_session_key: str | None = None,
+):
     if not idempotency_key:
         return None
 
-    return (
+    queryset = (
         Payment.objects.select_related("order")
         .filter(
             tenant=tenant,
-            user=request.user,
             provider_response__idempotency_key=idempotency_key,
             order__isnull=False,
         )
-        .first()
     )
+    if getattr(request.user, "is_authenticated", False):
+        queryset = queryset.filter(user=request.user)
+    elif guest_session_key:
+        queryset = queryset.filter(
+            user__isnull=True,
+            guest_session_key=guest_session_key,
+        )
+    else:
+        return None
+
+    return queryset.first()
 
 
 class IsAdminOrOwner(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return True
+
     def has_object_permission(self, request, view, obj):
         if user_is_tenant_staff(request.user, getattr(request, "tenant", None)):
             return True
+
+        if getattr(request.user, "is_authenticated", False):
+            owner = getattr(obj, "user", None)
+            if owner is not None:
+                return owner == request.user
+
+            order = getattr(obj, "order", None)
+            if order is not None:
+                return order.user == request.user
+
+            return False
+
+        guest_session_key = get_request_guest_session_key(request)
+        if not guest_session_key:
+            return False
+
+        guest_owner = getattr(obj, "guest_session_key", None)
+        if guest_owner is not None:
+            return guest_owner == guest_session_key
+
+        order = getattr(obj, "order", None)
+        if order is not None:
+            return order.guest_session_key == guest_session_key
 
         owner = getattr(obj, "user", None)
         if owner is not None:
             return owner == request.user
 
-        order = getattr(obj, "order", None)
-        if order is not None:
-            return order.user == request.user
-
         return False
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrOwner]
+    permission_classes = [permissions.AllowAny, IsAdminOrOwner]
     lookup_field = "slug"
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["status"]
-    search_fields = ["slug", "description"]
+    search_fields = ["slug", "description", "customer_email", "customer_name"]
     ordering_fields = ["created_at", "total_price", "status"]
+
+    def get_permissions(self):
+        if self.action == "transition_status":
+            permission_classes = [permissions.IsAuthenticated, IsTenantStaff]
+        elif self.action in {"create", "update", "partial_update", "destroy"}:
+            permission_classes = [permissions.IsAuthenticated, IsAdminOrOwner]
+        else:
+            permission_classes = [permissions.AllowAny, IsAdminOrOwner]
+        return [permission() for permission in permission_classes]
 
     def get_queryset(self):
         tenant = self.request.tenant  # type: ignore
@@ -109,7 +156,17 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         if user_is_tenant_staff(self.request.user, tenant):
             return queryset
-        return queryset.filter(user=self.request.user)
+        if getattr(self.request.user, "is_authenticated", False):
+            return queryset.filter(user=self.request.user)
+
+        guest_session_key = get_request_guest_session_key(self.request)
+        if not guest_session_key:
+            return queryset.none()
+
+        return queryset.filter(
+            user__isnull=True,
+            guest_session_key=guest_session_key,
+        )
 
     def get_serializer_class(self):
         if self.action == "checkout":
@@ -121,14 +178,29 @@ class OrderViewSet(viewsets.ModelViewSet):
         return OrderReadSerializer
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user, tenant=self.request.tenant)
+        address = serializer.validated_data.get("address")
+        serializer.save(
+            user=self.request.user,
+            tenant=self.request.tenant,
+            customer_name=(
+                self.request.user.get_full_name().strip()
+                or self.request.user.email
+                or self.request.user.username
+            ),
+            customer_email=self.request.user.email,
+            customer_phone=address.phone_number,
+            address_street_name=address.street_name,
+            address_city=address.city,
+            address_region=address.region,
+            address_additional_information=address.additional_information,
+        )
 
     @action(detail=False, methods=["post"], url_path="checkout")
     def checkout(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        address = serializer.validated_data["address"]
+        address = serializer.validated_data.get("address")
         description = serializer.validated_data.get("description", "")
         payment_method = serializer.validated_data.get(
             "payment_method",
@@ -138,11 +210,17 @@ class OrderViewSet(viewsets.ModelViewSet):
         coupon_code = serializer.validated_data.get("coupon_code", "")
         tenant = request.tenant
         idempotency_key = get_idempotency_key(request)
+        is_authenticated = getattr(request.user, "is_authenticated", False)
+        guest_session_key = get_request_guest_session_key(
+            request,
+            create=not is_authenticated,
+        )
 
         existing_payment = get_existing_checkout_payment(
             request=request,
             tenant=tenant,
             idempotency_key=idempotency_key,
+            guest_session_key=guest_session_key,
         )
         if existing_payment is not None:
             return build_checkout_response(
@@ -153,7 +231,15 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
-            cart = Cart.objects.select_for_update().filter(user=request.user).first()
+            cart_filters = (
+                {"user": request.user}
+                if is_authenticated
+                else {
+                    "user__isnull": True,
+                    "guest_session_key": guest_session_key,
+                }
+            )
+            cart = Cart.objects.select_for_update().filter(**cart_filters).first()
             if cart is None:
                 raise ValidationError({"detail": "Your cart is empty for this tenant."})
 
@@ -161,6 +247,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                 request=request,
                 tenant=tenant,
                 idempotency_key=idempotency_key,
+                guest_session_key=guest_session_key,
             )
             if existing_payment is not None:
                 return build_checkout_response(
@@ -208,9 +295,20 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
             order = create_order(
-                user=request.user,
+                user=request.user if is_authenticated else None,
                 tenant=tenant,
                 address=address,
+                guest_session_key=guest_session_key,
+                customer_name=serializer.validated_data.get("customer_name", ""),
+                customer_email=serializer.validated_data.get("customer_email", ""),
+                customer_phone=serializer.validated_data.get("customer_phone", ""),
+                address_street_name=serializer.validated_data.get("address_street_name", ""),
+                address_city=serializer.validated_data.get("address_city", ""),
+                address_region=serializer.validated_data.get("address_region", ""),
+                address_additional_information=serializer.validated_data.get(
+                    "address_additional_information",
+                    "",
+                ),
                 description=description or "Placed from checkout",
                 status=order_status,
             )
@@ -266,7 +364,8 @@ class OrderViewSet(viewsets.ModelViewSet):
 
             payment = Payment.objects.create(
                 tenant=tenant,
-                user=request.user,
+                user=request.user if is_authenticated else None,
+                guest_session_key=guest_session_key,
                 order=order,
                 provider=payment_method,
                 amount=order.total_price,
@@ -285,7 +384,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             logger.info(
                 "Checkout created order_id=%s user_id=%s tenant_id=%s payment_reference=%s request_id=%s",
                 order.id,
-                request.user.id,
+                getattr(request.user, "id", None),
                 getattr(tenant, "id", None),
                 payment.reference,
                 getattr(request, "id", ""),
@@ -327,7 +426,7 @@ class OrderItemViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrOwner]
+    permission_classes = [permissions.AllowAny, IsAdminOrOwner]
     serializer_class = OrderItemReadSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["order", "product", "variant"]
@@ -343,4 +442,15 @@ class OrderItemViewSet(
 
         if user_is_tenant_staff(self.request.user, tenant):
             return queryset
-        return queryset.filter(order__user=self.request.user)
+        if getattr(self.request.user, "is_authenticated", False):
+            return queryset.filter(order__user=self.request.user)
+
+        guest_session_key = get_request_guest_session_key(self.request)
+        if not guest_session_key:
+            return queryset.none()
+
+        return queryset.filter(
+            order__user__isnull=True,
+            order__guest_session_key=guest_session_key,
+        )
+

@@ -9,6 +9,7 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from apps.common.guest_sessions import get_request_guest_session_key
 from apps.tenants.models import TenantMembership
 from apps.tenants.permissions import is_platform_admin, user_has_tenant_role
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -30,6 +31,7 @@ from .serializers import (
 )
 from .services import (
     authenticate_with_google,
+    claim_guest_session_data,
     ensure_resend_allowed,
     generate_tokens_for_user,
     get_latest_active_otp,
@@ -78,7 +80,11 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        guest_session_key = get_request_guest_session_key(request)
         user = serializer.save()
+        claim_guest_session_data(user=user, guest_session_key=guest_session_key)
+        if guest_session_key:
+            request.session.cycle_key()
         tokens = generate_tokens_for_user(user)
 
         _, raw_code = issue_email_otp(
@@ -108,7 +114,11 @@ class LoginView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
+        guest_session_key = get_request_guest_session_key(request)
         user = serializer.validated_data["user"]
+        claim_guest_session_data(user=user, guest_session_key=guest_session_key)
+        if guest_session_key:
+            request.session.cycle_key()
         tokens = generate_tokens_for_user(user)
 
         return Response(
@@ -183,10 +193,14 @@ class GoogleLoginAPIView(APIView):
         serializer = GoogleLoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        guest_session_key = get_request_guest_session_key(request)
         result = authenticate_with_google(
             access_token=serializer.validated_data["access_token"],
             request=request,
         )
+        claim_guest_session_data(user=result.user, guest_session_key=guest_session_key)
+        if guest_session_key:
+            request.session.cycle_key()
 
         return Response(
             {
