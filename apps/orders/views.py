@@ -10,11 +10,18 @@ from rest_framework import filters, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.cart.models import Cart, CartItem
 from apps.common.guest_sessions import get_request_guest_session_key
 from apps.payments.models import Payment
+from apps.payments.services import build_checkout_summary, serialize_checkout_summary
 from apps.promotions.services import apply_coupon_to_order, increment_coupon_usage
+from apps.shipping.services import (
+    get_checkout_shipping_fee,
+    resolve_checkout_delivery_rate,
+    resolve_checkout_shipping_method,
+)
 from apps.tenants.permissions import IsTenantStaff
 from apps.tenants.utils import user_is_tenant_staff
 from .models import Order, OrderItem
@@ -83,6 +90,103 @@ def get_existing_checkout_payment(
         return None
 
     return queryset.first()
+
+
+def get_checkout_cart_items(*, request, tenant, lock: bool = False):
+    is_authenticated = getattr(request.user, "is_authenticated", False)
+    guest_session_key = get_request_guest_session_key(
+        request,
+        create=not is_authenticated,
+    )
+    cart_filters = (
+        {"user": request.user}
+        if is_authenticated
+        else {
+            "user__isnull": True,
+            "guest_session_key": guest_session_key,
+        }
+    )
+    cart_queryset = Cart.objects.filter(**cart_filters)
+    if lock:
+        cart_queryset = cart_queryset.select_for_update()
+    cart = cart_queryset.first()
+    if cart is None:
+        return [], guest_session_key
+
+    cart_items_queryset = (
+        CartItem.objects.select_related("cart", "variant", "variant__product")
+        .filter(
+            cart=cart,
+            variant__tenant=tenant,
+        )
+        .order_by("id")
+    )
+    if lock:
+        cart_items_queryset = cart_items_queryset.select_for_update()
+
+    return list(cart_items_queryset), guest_session_key
+
+
+class CheckoutSummaryView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        return self._build_summary_response(request, request.query_params)
+
+    def post(self, request, *args, **kwargs):
+        return self._build_summary_response(request, request.data)
+
+    def _build_summary_response(self, request, data):
+        serializer = OrderCheckoutSerializer(
+            data=data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        tenant = getattr(request, "tenant", None)
+        cart_items, _guest_session_key = get_checkout_cart_items(
+            request=request,
+            tenant=tenant,
+            lock=False,
+        )
+        delivery_option = serializer.validated_data.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = serializer.validated_data.get("pickup_station")
+
+        if not cart_items:
+            return Response(
+                {
+                    "items_subtotal": "0.00",
+                    "discount": "0.00",
+                    "shipping": "0.00",
+                    "total": "0.00",
+                    "delivery_option": delivery_option,
+                    "coupon_id": None,
+                    "coupon_code": "",
+                    "delivery_rate_id": None,
+                    "estimated_days": None,
+                    "shipping_method_id": None,
+                    "pickup_station_id": (
+                        pickup_station.id if pickup_station is not None else None
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        summary = build_checkout_summary(
+            cart_items=cart_items,
+            tenant=tenant,
+            delivery_option=delivery_option,
+            pickup_station=pickup_station,
+            address=serializer.validated_data.get("address"),
+            address_city=serializer.validated_data.get("address_city", ""),
+            address_region=serializer.validated_data.get("address_region", ""),
+            address_area=serializer.validated_data.get("address_area", ""),
+            coupon_code=serializer.validated_data.get("coupon_code", ""),
+        )
+        return Response(serialize_checkout_summary(summary), status=status.HTTP_200_OK)
 
 
 class IsAdminOrOwner(permissions.BasePermission):
@@ -191,6 +295,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             customer_phone=address.phone_number,
             address_street_name=address.street_name,
             address_city=address.city,
+            address_area=address.area,
             address_region=address.region,
             address_additional_information=address.additional_information,
         )
@@ -206,9 +311,16 @@ class OrderViewSet(viewsets.ModelViewSet):
             "payment_method",
             Payment.Provider.CASH,
         )
-        shipping_method = serializer.validated_data.get("shipping_method")
+        delivery_option = serializer.validated_data.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = serializer.validated_data.get("pickup_station")
         coupon_code = serializer.validated_data.get("coupon_code", "")
         tenant = request.tenant
+        shipping_method = resolve_checkout_shipping_method(
+            delivery_option=delivery_option
+        )
         idempotency_key = get_idempotency_key(request)
         is_authenticated = getattr(request.user, "is_authenticated", False)
         guest_session_key = get_request_guest_session_key(
@@ -257,14 +369,10 @@ class OrderViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_200_OK,
                 )
 
-            cart_items = list(
-                CartItem.objects.select_for_update()
-                .select_related("cart", "variant", "variant__product")
-                .filter(
-                    cart=cart,
-                    variant__tenant=tenant,
-                )
-                .order_by("id")
+            cart_items, _guest_session_key = get_checkout_cart_items(
+                request=request,
+                tenant=tenant,
+                lock=True,
             )
 
             if not cart_items:
@@ -304,6 +412,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                 customer_phone=serializer.validated_data.get("customer_phone", ""),
                 address_street_name=serializer.validated_data.get("address_street_name", ""),
                 address_city=serializer.validated_data.get("address_city", ""),
+                address_area=serializer.validated_data.get("address_area", ""),
                 address_region=serializer.validated_data.get("address_region", ""),
                 address_additional_information=serializer.validated_data.get(
                     "address_additional_information",
@@ -311,6 +420,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 ),
                 description=description or "Placed from checkout",
                 status=order_status,
+                delivery_option=delivery_option,
+                pickup_station=pickup_station,
             )
 
             for cart_item in cart_items:
@@ -336,18 +447,50 @@ class OrderViewSet(viewsets.ModelViewSet):
                 discount_amount = coupon_result["discount"]
                 increment_coupon_usage(coupon=applied_coupon)
 
-            shipping_fee = shipping_method.fee if shipping_method is not None else Decimal("0.00")
+            delivery_rate = resolve_checkout_delivery_rate(
+                tenant=tenant,
+                delivery_option=delivery_option,
+                address=address,
+                address_city=serializer.validated_data.get("address_city", ""),
+                address_region=serializer.validated_data.get("address_region", ""),
+                address_area=serializer.validated_data.get("address_area", ""),
+            )
+            shipping_fee = get_checkout_shipping_fee(
+                tenant=tenant,
+                delivery_option=delivery_option,
+                pickup_station=pickup_station,
+                shipping_method=shipping_method,
+                address=address,
+                address_city=serializer.validated_data.get("address_city", ""),
+                address_region=serializer.validated_data.get("address_region", ""),
+                address_area=serializer.validated_data.get("address_area", ""),
+            )
             final_total = max(items_subtotal - discount_amount, Decimal("0.00")) + shipping_fee
+            order.items_subtotal = items_subtotal
+            order.discount_amount = discount_amount
+            order.shipping_fee = shipping_fee
             order.total_price = final_total
-            order.save(update_fields=["total_price", "updated_at"])
+            order.save(
+                update_fields=[
+                    "items_subtotal",
+                    "discount_amount",
+                    "shipping_fee",
+                    "total_price",
+                    "updated_at",
+                ]
+            )
 
             checkout_summary = {
                 "items_subtotal": str(items_subtotal),
                 "discount": str(discount_amount),
                 "shipping": str(shipping_fee),
                 "total": str(final_total),
+                "delivery_option": delivery_option,
                 "coupon_code": applied_coupon.code if applied_coupon is not None else "",
+                "delivery_rate_id": delivery_rate.id if delivery_rate is not None else None,
+                "estimated_days": delivery_rate.estimated_days if delivery_rate is not None else None,
                 "shipping_method_id": shipping_method.id if shipping_method is not None else None,
+                "pickup_station_id": pickup_station.id if pickup_station is not None else None,
             }
 
             payment_status = (

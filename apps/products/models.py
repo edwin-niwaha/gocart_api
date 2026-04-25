@@ -79,6 +79,16 @@ class Product(TimeStampedModel):
         return self.title
 
     @property
+    def primary_image(self) -> str | None:
+        if self.hero_image:
+            return self.hero_image
+        if isinstance(self.image_urls, list):
+            for image_url in self.image_urls:
+                if image_url:
+                    return image_url
+        return None
+
+    @property
     def base_price(self):
         first_variant = self.variants.filter(is_active=True).order_by("price").first()  # type: ignore
         return first_variant.price if first_variant else Decimal("0.00")

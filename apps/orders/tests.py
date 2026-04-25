@@ -20,7 +20,7 @@ from apps.orders.tasks import (
 from apps.payments.models import Payment
 from apps.products.models import Category, Product, ProductVariant
 from apps.promotions.models import Coupon
-from apps.shipping.models import ShippingMethod
+from apps.shipping.models import DeliveryRate, PickupStation, ShippingMethod
 from apps.tenants.models import Tenant, TenantMembership
 
 User = get_user_model()
@@ -42,6 +42,18 @@ class OrderTenantCheckoutTests(TestCase):
         self.variant_b = ProductVariant.objects.create(tenant=self.tenant_b, product=self.product_b, name="1kg", sku="B1", price="2000.00", stock_quantity=10)
         self.address = CustomerAddress.objects.create(user=self.user, street_name="Plot 1", city="Kampala", region=CustomerAddress.Region.KAMPALA_AREA)
         self.cart = Cart.objects.create(user=self.user)
+        self.create_delivery_rate(fee="0.00")
+
+    def create_delivery_rate(self, *, fee: str, city: str = "", area: str = "", estimated_days: int = 1):
+        return DeliveryRate.objects.create(
+            tenant=self.tenant_a,
+            region=CustomerAddress.Region.KAMPALA_AREA,
+            city=city,
+            area=area,
+            fee=fee,
+            estimated_days=estimated_days,
+            is_active=True,
+        )
 
     def test_checkout_uses_active_tenant_items_only(self):
         CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
@@ -67,6 +79,11 @@ class OrderTenantCheckoutTests(TestCase):
             estimated_days=1,
             is_active=True,
         )
+        delivery_rate = self.create_delivery_rate(
+            city="Kampala",
+            fee="500.00",
+            estimated_days=1,
+        )
         coupon = Coupon.objects.create(
             tenant=self.tenant_a,
             code="SAVE300",
@@ -81,7 +98,6 @@ class OrderTenantCheckoutTests(TestCase):
             "/api/v1/orders/checkout/",
             {
                 "address_id": self.address.id,
-                "shipping_method_id": shipping_method.id,
                 "coupon_code": "save300",
                 "payment_method": Payment.Provider.CASH,
             },
@@ -94,7 +110,10 @@ class OrderTenantCheckoutTests(TestCase):
         payment = Payment.objects.get(order=order)
         coupon.refresh_from_db()
 
-        self.assertEqual(order.total_price, 2200)
+        self.assertEqual(order.items_subtotal, Decimal("2000.00"))
+        self.assertEqual(order.discount_amount, Decimal("300.00"))
+        self.assertEqual(order.shipping_fee, Decimal("500.00"))
+        self.assertEqual(order.total_price, Decimal("2200.00"))
         self.assertEqual(payment.amount, order.total_price)
         self.assertEqual(coupon.used_count, 1)
         self.assertEqual(payment.provider_response["checkout_summary"]["items_subtotal"], "2000.00")
@@ -103,8 +122,65 @@ class OrderTenantCheckoutTests(TestCase):
         self.assertEqual(payment.provider_response["checkout_summary"]["total"], "2200.00")
         self.assertEqual(payment.provider_response["checkout_summary"]["coupon_code"], coupon.code)
         self.assertEqual(
+            payment.provider_response["checkout_summary"]["delivery_rate_id"],
+            delivery_rate.id,
+        )
+        self.assertEqual(
             payment.provider_response["checkout_summary"]["shipping_method_id"],
             shipping_method.id,
+        )
+
+    def test_checkout_pickup_station_uses_zero_checkout_fee_and_sets_delivery_option(self):
+        CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
+        pickup_station = PickupStation.objects.create(
+            tenant=self.tenant_a,
+            name="Wandegeya Pickup",
+            city="Kampala",
+            area="Wandegeya",
+            address="Bombo Road Stage",
+            is_active=True,
+        )
+
+        response = self.client.post(
+            "/api/v1/orders/checkout/",
+            {
+                "address_id": self.address.id,
+                "delivery_option": Order.DeliveryOption.PICKUP_STATION,
+                "pickup_station_id": pickup_station.id,
+                "payment_method": Payment.Provider.CASH,
+            },
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant_a.slug,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        order = Order.objects.get(slug=response.data["order"]["slug"])
+        payment = Payment.objects.get(order=order)
+
+        self.assertEqual(order.delivery_option, Order.DeliveryOption.PICKUP_STATION)
+        self.assertEqual(order.pickup_station, pickup_station)
+        self.assertEqual(order.items_subtotal, Decimal("2000.00"))
+        self.assertEqual(order.discount_amount, Decimal("0.00"))
+        self.assertEqual(order.shipping_fee, Decimal("0.00"))
+        self.assertEqual(order.total_price, Decimal("2000.00"))
+        self.assertEqual(order.pickup_station_name, pickup_station.name)
+        self.assertEqual(order.pickup_station_city, pickup_station.city)
+        self.assertEqual(order.pickup_station_area, pickup_station.area)
+        self.assertEqual(order.pickup_station_address, pickup_station.address)
+        self.assertEqual(payment.amount, order.total_price)
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["delivery_option"],
+            Order.DeliveryOption.PICKUP_STATION,
+        )
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["pickup_station_id"],
+            pickup_station.id,
+        )
+        self.assertIsNone(
+            payment.provider_response["checkout_summary"]["shipping_method_id"]
+        )
+        self.assertIsNone(
+            payment.provider_response["checkout_summary"]["delivery_rate_id"]
         )
 
     def test_checkout_replay_after_cart_consumed_does_not_create_duplicate_order(self):
@@ -146,9 +222,13 @@ class OrderTenantCheckoutTests(TestCase):
             estimated_days=1,
             is_active=True,
         )
+        delivery_rate = self.create_delivery_rate(
+            city="Kampala",
+            fee="5000.00",
+            estimated_days=1,
+        )
         payload = {
             "address_id": self.address.id,
-            "shipping_method_id": shipping_method.id,
             "payment_method": Payment.Provider.CASH,
         }
         headers = {
@@ -179,12 +259,23 @@ class OrderTenantCheckoutTests(TestCase):
         payment = Payment.objects.get(order=order)
 
         self.assertEqual(order.items.count(), 2)
+        self.assertEqual(order.items_subtotal, Decimal("3000.00"))
+        self.assertEqual(order.discount_amount, Decimal("0.00"))
+        self.assertEqual(order.shipping_fee, Decimal("5000.00"))
         self.assertEqual(order.total_price, Decimal("8000.00"))
         self.assertEqual(payment.amount, order.total_price)
         self.assertEqual(payment.provider_response["checkout_summary"]["items_subtotal"], "3000.00")
         self.assertEqual(payment.provider_response["checkout_summary"]["shipping"], "5000.00")
         self.assertEqual(payment.provider_response["checkout_summary"]["total"], "8000.00")
         self.assertEqual(payment.provider_response["idempotency_key"], "checkout-test-key-001")
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["delivery_rate_id"],
+            delivery_rate.id,
+        )
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["shipping_method_id"],
+            shipping_method.id,
+        )
 
     def test_checkout_insufficient_stock_does_not_create_order_or_payment(self):
         CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
@@ -226,9 +317,55 @@ class OrderTenantCheckoutTests(TestCase):
         order = Order.objects.get(slug=response.data["order"]["slug"])
         payment = Payment.objects.get(order=order)
         self.assertEqual(order.status, Order.Status.AWAITING_PAYMENT)
+        self.assertEqual(order.items_subtotal, Decimal("2000.00"))
+        self.assertEqual(order.discount_amount, Decimal("0.00"))
+        self.assertEqual(order.shipping_fee, Decimal("0.00"))
         self.assertEqual(payment.provider, Payment.Provider.MTN)
         self.assertEqual(payment.status, Payment.Status.PROCESSING)
         self.assertEqual(payment.amount, order.total_price)
+
+    def test_checkout_summary_uses_address_based_delivery_rate(self):
+        CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
+        delivery_rate = self.create_delivery_rate(
+            city="Kampala",
+            fee="1500.00",
+            estimated_days=2,
+        )
+
+        response = self.client.get(
+            "/api/v1/checkout/summary/",
+            {
+                "address_id": self.address.id,
+                "delivery_option": Order.DeliveryOption.HOME_DELIVERY,
+            },
+            HTTP_X_TENANT_SLUG=self.tenant_a.slug,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["items_subtotal"], "2000.00")
+        self.assertEqual(response.data["shipping"], "1500.00")
+        self.assertEqual(response.data["total"], "3500.00")
+        self.assertEqual(response.data["delivery_rate_id"], delivery_rate.id)
+        self.assertEqual(response.data["estimated_days"], 2)
+
+    def test_checkout_returns_validation_error_when_no_delivery_rate_matches(self):
+        CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=1, unit_price="1000.00")
+        DeliveryRate.objects.filter(tenant=self.tenant_a).delete()
+
+        response = self.client.post(
+            "/api/v1/orders/checkout/",
+            {"address_id": self.address.id, "payment_method": Payment.Provider.CASH},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant_a.slug,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Delivery is not available for this location.",
+        )
+        self.assertEqual(response.data["code"], "validation_error")
+        self.assertFalse(Order.objects.exists())
 
     def test_tenant_staff_can_checkout_own_cart(self):
         staff = User.objects.create_user(email="checkout-staff@example.com", username="checkoutstaff", password="secret123")
@@ -436,6 +573,15 @@ class GuestOrderCheckoutTests(TestCase):
             price="12000.00",
             stock_quantity=10,
         )
+        DeliveryRate.objects.create(
+            tenant=self.tenant,
+            region=CustomerAddress.Region.KAMPALA_AREA,
+            city="",
+            area="",
+            fee="0.00",
+            estimated_days=1,
+            is_active=True,
+        )
 
     def test_guest_checkout_creates_guest_order_and_cash_payment(self):
         add_response = self.client.post(
@@ -470,6 +616,9 @@ class GuestOrderCheckoutTests(TestCase):
         self.assertTrue(order.guest_session_key)
         self.assertEqual(order.customer_email, "guest.customer@example.com")
         self.assertEqual(order.address_street_name, "Plot 44")
+        self.assertEqual(order.items_subtotal, Decimal("24000.00"))
+        self.assertEqual(order.discount_amount, Decimal("0.00"))
+        self.assertEqual(order.shipping_fee, Decimal("0.00"))
         self.assertEqual(order.total_price, Decimal("24000.00"))
         self.assertIsNone(payment.user)
         self.assertEqual(payment.amount, order.total_price)

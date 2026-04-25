@@ -31,6 +31,7 @@ def generate_order_slug(*, user=None, prefix: str = "order") -> str:
 
 def _populate_order_snapshot(*, user=None, validated_data: dict) -> None:
     address = validated_data.get("address")
+    pickup_station = validated_data.get("pickup_station")
     customer_name = (validated_data.get("customer_name") or "").strip()
     customer_email = (validated_data.get("customer_email") or "").strip().lower()
     customer_phone = (validated_data.get("customer_phone") or "").strip()
@@ -53,6 +54,10 @@ def _populate_order_snapshot(*, user=None, validated_data: dict) -> None:
         validated_data.get("address_city")
         or getattr(address, "city", "")
     )
+    validated_data["address_area"] = (
+        validated_data.get("address_area")
+        or getattr(address, "area", "")
+    )
     validated_data["address_region"] = (
         validated_data.get("address_region")
         or getattr(address, "region", "")
@@ -60,6 +65,30 @@ def _populate_order_snapshot(*, user=None, validated_data: dict) -> None:
     validated_data["address_additional_information"] = (
         validated_data.get("address_additional_information")
         or getattr(address, "additional_information", "")
+    )
+    validated_data["pickup_station_name"] = (
+        validated_data.get("pickup_station_name")
+        or getattr(pickup_station, "name", "")
+    )
+    validated_data["pickup_station_city"] = (
+        validated_data.get("pickup_station_city")
+        or getattr(pickup_station, "city", "")
+    )
+    validated_data["pickup_station_area"] = (
+        validated_data.get("pickup_station_area")
+        or getattr(pickup_station, "area", "")
+    )
+    validated_data["pickup_station_address"] = (
+        validated_data.get("pickup_station_address")
+        or getattr(pickup_station, "address", "")
+    )
+    validated_data["pickup_station_phone"] = (
+        validated_data.get("pickup_station_phone")
+        or getattr(pickup_station, "phone", "")
+    )
+    validated_data["pickup_station_opening_hours"] = (
+        validated_data.get("pickup_station_opening_hours")
+        or getattr(pickup_station, "opening_hours", "")
     )
 
 

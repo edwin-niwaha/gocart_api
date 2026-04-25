@@ -45,17 +45,29 @@ class OrderAdmin(TenantScopedAdminMixin):
         "tenant",
         "user",
         "status",
+        "delivery_option",
+        "pickup_station",
+        "items_subtotal",
+        "discount_amount",
+        "shipping_fee",
         "total_price",
         "total_items",
         "created_at",
     ]
     list_filter = ["tenant", "status", "created_at", "updated_at"]
     search_fields = ["slug", "tenant__name", "user__email", "user__username"]
-    readonly_fields = ["total_price", "created_at", "updated_at"]
+    readonly_fields = [
+        "items_subtotal",
+        "discount_amount",
+        "shipping_fee",
+        "total_price",
+        "created_at",
+        "updated_at",
+    ]
     inlines = [OrderItemInline]
     date_hierarchy = "created_at"
     ordering = ["tenant", "-created_at"]
-    autocomplete_fields = ["tenant", "user", "address"]
+    autocomplete_fields = ["tenant", "user", "address", "pickup_station"]
 
 
 @admin.register(OrderItem)

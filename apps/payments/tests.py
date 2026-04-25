@@ -12,7 +12,7 @@ from apps.orders.models import Order
 from apps.payments.models import Payment
 from apps.products.models import Category, Product, ProductVariant
 from apps.promotions.models import Coupon
-from apps.shipping.models import ShippingMethod
+from apps.shipping.models import DeliveryRate, PickupStation, ShippingMethod
 from apps.tenants.models import Tenant
 
 User = get_user_model()
@@ -41,6 +41,18 @@ class PaymentFinalizeSafetyTests(TestCase):
             region=CustomerAddress.Region.KAMPALA_AREA,
         )
         self.cart = Cart.objects.create(user=self.user)
+        self.create_delivery_rate(fee="0.00")
+
+    def create_delivery_rate(self, *, fee: str, city: str = "", area: str = "", estimated_days: int = 1):
+        return DeliveryRate.objects.create(
+            tenant=self.tenant,
+            region=CustomerAddress.Region.KAMPALA_AREA,
+            city=city,
+            area=area,
+            fee=fee,
+            estimated_days=estimated_days,
+            is_active=True,
+        )
 
     def create_discount_and_shipping(self):
         shipping_method = ShippingMethod.objects.create(
@@ -48,6 +60,11 @@ class PaymentFinalizeSafetyTests(TestCase):
             fee="500.00",
             estimated_days=1,
             is_active=True,
+        )
+        delivery_rate = self.create_delivery_rate(
+            city="Kampala",
+            fee="500.00",
+            estimated_days=1,
         )
         coupon = Coupon.objects.create(
             tenant=self.tenant,
@@ -58,7 +75,7 @@ class PaymentFinalizeSafetyTests(TestCase):
             ends_at=timezone.now() + timedelta(days=1),
             is_active=True,
         )
-        return coupon, shipping_method
+        return coupon, shipping_method, delivery_rate
 
     @override_settings(
         ENABLE_MOMO=True,
@@ -76,7 +93,7 @@ class PaymentFinalizeSafetyTests(TestCase):
             quantity=2,
             unit_price="1000.00",
         )
-        coupon, shipping_method = self.create_discount_and_shipping()
+        coupon, shipping_method, delivery_rate = self.create_discount_and_shipping()
         request_to_pay.return_value = {
             "reference_id": "mtn-reference",
             "status_code": 202,
@@ -88,7 +105,6 @@ class PaymentFinalizeSafetyTests(TestCase):
             {
                 "address_id": self.address.id,
                 "phone_number": "0772123456",
-                "shipping_method_id": shipping_method.id,
                 "coupon_code": "save300",
             },
             format="json",
@@ -106,6 +122,10 @@ class PaymentFinalizeSafetyTests(TestCase):
         self.assertEqual(payment.provider_response["checkout_summary"]["shipping"], "500.00")
         self.assertEqual(payment.provider_response["checkout_summary"]["total"], "2200.00")
         self.assertEqual(payment.provider_response["checkout_summary"]["coupon_code"], coupon.code)
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["delivery_rate_id"],
+            delivery_rate.id,
+        )
         self.assertEqual(
             payment.provider_response["checkout_summary"]["shipping_method_id"],
             shipping_method.id,
@@ -165,6 +185,68 @@ class PaymentFinalizeSafetyTests(TestCase):
         payment = Payment.objects.get(reference=first_response.data["reference"])
         self.assertEqual(payment.provider_response["idempotency_key"], "payment-initiate-key-001")
 
+    @override_settings(
+        ENABLE_MOMO=True,
+        SUBSCRIPTION_KEY="test-subscription",
+        MOMO_API_USER="test-user",
+        MOMO_API_KEY="test-key",
+        MOMO_BASE_URL="https://momo.example.test",
+        MOMO_CURRENCY=Payment.Currency.UGX,
+    )
+    @patch("apps.payments.services.request_to_pay")
+    def test_mtn_initiation_with_pickup_station_uses_zero_checkout_fee(self, request_to_pay):
+        CartItem.objects.create(
+            cart=self.cart,
+            variant=self.variant,
+            quantity=2,
+            unit_price="1000.00",
+        )
+        pickup_station = PickupStation.objects.create(
+            tenant=self.tenant,
+            name="Ntinda Pickup",
+            city="Kampala",
+            area="Ntinda",
+            address="Ntinda Complex",
+            is_active=True,
+        )
+        request_to_pay.return_value = {
+            "reference_id": "mtn-pickup-reference",
+            "status_code": 202,
+            "data": {},
+        }
+
+        response = self.client.post(
+            "/api/v1/payments/mtn/initiate/",
+            {
+                "address_id": self.address.id,
+                "phone_number": "0772123456",
+                "delivery_option": Order.DeliveryOption.PICKUP_STATION,
+                "pickup_station_id": pickup_station.id,
+            },
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(reference=response.data["reference"])
+        self.assertEqual(payment.amount, Decimal("2000.00"))
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["delivery_option"],
+            Order.DeliveryOption.PICKUP_STATION,
+        )
+        self.assertEqual(
+            payment.provider_response["checkout_summary"]["pickup_station_id"],
+            pickup_station.id,
+        )
+        self.assertIsNone(
+            payment.provider_response["checkout_summary"]["shipping_method_id"]
+        )
+        self.assertIsNone(
+            payment.provider_response["checkout_summary"]["delivery_rate_id"]
+        )
+        request_to_pay.assert_called_once()
+        self.assertEqual(request_to_pay.call_args.kwargs["amount"], Decimal("2000.00"))
+
     def test_finalize_paid_payment_applies_stored_coupon_and_shipping_total(self):
         CartItem.objects.create(
             cart=self.cart,
@@ -172,7 +254,7 @@ class PaymentFinalizeSafetyTests(TestCase):
             quantity=2,
             unit_price="1000.00",
         )
-        coupon, shipping_method = self.create_discount_and_shipping()
+        coupon, shipping_method, delivery_rate = self.create_discount_and_shipping()
         payment = Payment.objects.create(
             tenant=self.tenant,
             user=self.user,
@@ -197,6 +279,8 @@ class PaymentFinalizeSafetyTests(TestCase):
                     "total": "2200.00",
                     "coupon_id": coupon.id,
                     "coupon_code": coupon.code,
+                    "delivery_rate_id": delivery_rate.id,
+                    "estimated_days": delivery_rate.estimated_days,
                     "shipping_method_id": shipping_method.id,
                 },
             },
@@ -215,10 +299,83 @@ class PaymentFinalizeSafetyTests(TestCase):
         coupon.refresh_from_db()
         self.variant.refresh_from_db()
 
+        self.assertEqual(order.items_subtotal, Decimal("2000.00"))
+        self.assertEqual(order.discount_amount, Decimal("300.00"))
+        self.assertEqual(order.shipping_fee, Decimal("500.00"))
         self.assertEqual(order.total_price, Decimal("2200.00"))
         self.assertEqual(payment.amount, order.total_price)
         self.assertEqual(payment.order, order)
         self.assertEqual(coupon.used_count, 1)
+        self.assertEqual(self.variant.stock_quantity, 8)
+
+    def test_finalize_paid_payment_reuses_stored_pickup_station(self):
+        CartItem.objects.create(
+            cart=self.cart,
+            variant=self.variant,
+            quantity=2,
+            unit_price="1000.00",
+        )
+        pickup_station = PickupStation.objects.create(
+            tenant=self.tenant,
+            name="Naalya Pickup",
+            city="Kampala",
+            area="Naalya",
+            address="Metroplex",
+            is_active=True,
+        )
+        payment = Payment.objects.create(
+            tenant=self.tenant,
+            user=self.user,
+            provider=Payment.Provider.MTN,
+            status=Payment.Status.PAID,
+            amount="2000.00",
+            currency=Payment.Currency.UGX,
+            provider_response={
+                "address_id": self.address.id,
+                "cart_snapshot": [
+                    {
+                        "variant_id": self.variant.id,
+                        "quantity": 2,
+                        "unit_price": "1000.00",
+                    }
+                ],
+                "cart_total": "2000.00",
+                "checkout_summary": {
+                    "items_subtotal": "2000.00",
+                    "discount": "0.00",
+                    "shipping": "0.00",
+                    "total": "2000.00",
+                    "delivery_option": Order.DeliveryOption.PICKUP_STATION,
+                    "coupon_id": None,
+                    "coupon_code": "",
+                    "delivery_rate_id": None,
+                    "estimated_days": None,
+                    "shipping_method_id": None,
+                    "pickup_station_id": pickup_station.id,
+                },
+            },
+        )
+
+        response = self.client.post(
+            f"/api/v1/payments/{payment.reference}/finalize-order/",
+            {},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        order = Order.objects.get(slug=response.data["order"]["slug"])
+        payment.refresh_from_db()
+        self.variant.refresh_from_db()
+
+        self.assertEqual(order.delivery_option, Order.DeliveryOption.PICKUP_STATION)
+        self.assertEqual(order.pickup_station, pickup_station)
+        self.assertEqual(order.items_subtotal, Decimal("2000.00"))
+        self.assertEqual(order.discount_amount, Decimal("0.00"))
+        self.assertEqual(order.shipping_fee, Decimal("0.00"))
+        self.assertEqual(order.total_price, Decimal("2000.00"))
+        self.assertEqual(payment.amount, order.total_price)
+        self.assertEqual(payment.order, order)
         self.assertEqual(self.variant.stock_quantity, 8)
 
     def test_finalize_paid_order_rejects_changed_cart_amount(self):

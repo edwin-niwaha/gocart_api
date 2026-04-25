@@ -32,6 +32,8 @@ router.register("wishlist", wishlist_views.WishlistViewSet, basename="wishlist")
 router.register("wishlist-items", wishlist_views.WishlistItemViewSet, basename="wishlist-items")
 router.register("addresses", address_views.CustomerAddressViewSet, basename="addresses")
 router.register("shipping-methods", shipping_views.ShippingMethodViewSet, basename="shipping-methods")
+router.register("pickup-stations", shipping_views.PickupStationViewSet, basename="pickup-stations")
+router.register("delivery-rates", shipping_views.DeliveryRateViewSet, basename="delivery-rates")
 router.register("shipments", shipping_views.ShipmentViewSet, basename="shipments")
 router.register("coupons", promotions_views.CouponViewSet, basename="coupons")
 router.register("notifications", notification_views.NotificationViewSet, basename="notifications")
@@ -53,5 +55,7 @@ urlpatterns = [
     path("payments/", include("apps.payments.urls")),
     path("admin/payments/", include("apps.payments.admin_urls")),
     path("admin/dashboard/summary/", analytics_views.AdminDashboardSummaryView.as_view(), name="admin-dashboard-summary"),
+    path("checkout/summary/", order_views.CheckoutSummaryView.as_view(), name="checkout-summary"),
+    path("checkout/validate/", order_views.CheckoutSummaryView.as_view(), name="checkout-validate"),
     path("", include(router.urls)),
 ]

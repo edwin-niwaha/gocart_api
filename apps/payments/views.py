@@ -1,6 +1,8 @@
 import logging
 
+from django.db.models import Q
 from django.db import transaction
+from decimal import Decimal
 from rest_framework import status
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -14,6 +16,7 @@ from apps.orders.serializers import OrderReadSerializer
 from apps.orders.services import add_order_item, create_order
 from apps.promotions.models import Coupon
 from apps.promotions.services import increment_coupon_usage
+from apps.shipping.models import PickupStation
 from rest_framework import generics
 
 from .models import Payment
@@ -90,7 +93,11 @@ class MTNInitiatePaymentView(APIView):
 
         address = serializer.context["address_instance"]
         phone_number = serializer.validated_data["phone_number"]
-        shipping_method = serializer.validated_data.get("shipping_method")
+        delivery_option = serializer.validated_data.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = serializer.validated_data.get("pickup_station")
         coupon_code = serializer.validated_data.get("coupon_code", "")
         order = None  # DO NOT create order yet
 
@@ -100,7 +107,8 @@ class MTNInitiatePaymentView(APIView):
             phone_number=phone_number,
             address=address,
             tenant=request.tenant,
-            shipping_method=shipping_method,
+            delivery_option=delivery_option,
+            pickup_station=pickup_station,
             coupon_code=coupon_code,
             idempotency_key=idempotency_key,
         )
@@ -288,12 +296,33 @@ class FinalizePaidOrderView(APIView):
                 locked_variants[cart_item.id] = variant
 
             # ALWAYS create order here after successful payment and cart verification.
+            checkout_summary = payment.provider_response.get("checkout_summary") or {}
+            delivery_option = checkout_summary.get("delivery_option") or Order.DeliveryOption.HOME_DELIVERY
+            pickup_station = None
+            pickup_station_id = checkout_summary.get("pickup_station_id")
+
+            if delivery_option == Order.DeliveryOption.PICKUP_STATION:
+                if not pickup_station_id:
+                    raise ValidationError(
+                        {"detail": "Pickup station information missing from payment."}
+                    )
+
+                pickup_station = PickupStation.objects.filter(
+                    Q(tenant=request.tenant) | Q(tenant__isnull=True),
+                    id=pickup_station_id,
+                    is_active=True,
+                ).first()
+                if pickup_station is None:
+                    raise ValidationError({"detail": "Pickup station not found."})
+
             order = create_order(
                 user=request.user,
                 tenant=request.tenant,
                 address=address,
                 description="Placed after successful mobile money payment",
                 status=Order.Status.PAID,
+                delivery_option=delivery_option,
+                pickup_station=pickup_station,
             )
 
             payment.order = order
@@ -311,14 +340,26 @@ class FinalizePaidOrderView(APIView):
                     unit_price=cart_item.unit_price,
                 )
 
+            order.discount_amount = Decimal(
+                str(checkout_summary.get("discount", "0.00"))
+            )
+            order.shipping_fee = Decimal(
+                str(checkout_summary.get("shipping", "0.00"))
+            )
             order.recalculate_total_price()
-            order.total_price = payment.amount
             order.status = Order.Status.PAID
-            order.save(update_fields=["total_price", "status", "updated_at"])
+            order.save(
+                update_fields=[
+                    "items_subtotal",
+                    "discount_amount",
+                    "shipping_fee",
+                    "status",
+                    "updated_at",
+                ]
+            )
 
             CartItem.objects.filter(id__in=[item.id for item in cart_items]).delete()
 
-            checkout_summary = payment.provider_response.get("checkout_summary") or {}
             coupon_id = checkout_summary.get("coupon_id")
             if coupon_id:
                 coupon = Coupon.objects.filter(id=coupon_id, tenant=request.tenant).first()

@@ -9,7 +9,13 @@ from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
 from apps.cart.models import CartItem
+from apps.orders.models import Order
 from apps.promotions.services import calculate_coupon_discount, get_valid_coupon
+from apps.shipping.services import (
+    get_checkout_shipping_fee,
+    resolve_checkout_delivery_rate,
+    resolve_checkout_shipping_method,
+)
 from .models import Payment
 
 logger = logging.getLogger(__name__)
@@ -178,19 +184,44 @@ def build_checkout_summary(
     *,
     cart_items: list[CartItem],
     tenant=None,
-    shipping_method=None,
+    delivery_option: str = Order.DeliveryOption.HOME_DELIVERY,
+    pickup_station=None,
+    address=None,
+    address_city: str = "",
+    address_region: str = "",
+    address_area: str = "",
     coupon_code: str = "",
 ) -> dict:
     items_subtotal = get_cart_total_from_items(cart_items)
     discount = Decimal("0.00")
     coupon = None
+    shipping_method = resolve_checkout_shipping_method(
+        delivery_option=delivery_option
+    )
+    delivery_rate = resolve_checkout_delivery_rate(
+        tenant=tenant,
+        delivery_option=delivery_option,
+        address=address,
+        address_city=address_city,
+        address_region=address_region,
+        address_area=address_area,
+    )
 
     if coupon_code:
         coupon = get_valid_coupon(code=coupon_code, tenant=tenant)
         validate_coupon_for_cart_items(coupon=coupon, cart_items=cart_items)
         discount = calculate_coupon_discount(coupon=coupon, amount=items_subtotal)
 
-    shipping = shipping_method.fee if shipping_method is not None else Decimal("0.00")
+    shipping = get_checkout_shipping_fee(
+        tenant=tenant,
+        delivery_option=delivery_option,
+        pickup_station=pickup_station,
+        shipping_method=shipping_method,
+        address=address,
+        address_city=address_city,
+        address_region=address_region,
+        address_area=address_area,
+    )
     total = max(items_subtotal - discount, Decimal("0.00")) + shipping
 
     return {
@@ -198,10 +229,14 @@ def build_checkout_summary(
         "discount": discount,
         "shipping": shipping,
         "total": total,
+        "delivery_option": delivery_option,
         "coupon": coupon,
         "coupon_id": coupon.id if coupon is not None else None,
         "coupon_code": coupon.code if coupon is not None else "",
+        "delivery_rate_id": delivery_rate.id if delivery_rate is not None else None,
+        "estimated_days": delivery_rate.estimated_days if delivery_rate is not None else None,
         "shipping_method_id": shipping_method.id if shipping_method is not None else None,
+        "pickup_station_id": pickup_station.id if pickup_station is not None else None,
     }
 
 
@@ -211,9 +246,13 @@ def serialize_checkout_summary(summary: dict) -> dict:
         "discount": str(summary["discount"]),
         "shipping": str(summary["shipping"]),
         "total": str(summary["total"]),
+        "delivery_option": summary["delivery_option"],
         "coupon_id": summary["coupon_id"],
         "coupon_code": summary["coupon_code"],
+        "delivery_rate_id": summary["delivery_rate_id"],
+        "estimated_days": summary["estimated_days"],
         "shipping_method_id": summary["shipping_method_id"],
+        "pickup_station_id": summary["pickup_station_id"],
     }
 
 
@@ -258,7 +297,8 @@ def initiate_mtn_payment(
     phone_number: str,
     address,
     tenant=None,
-    shipping_method=None,
+    delivery_option: str = Order.DeliveryOption.HOME_DELIVERY,
+    pickup_station=None,
     coupon_code: str = "",
     idempotency_key: str = "",
 ) -> Payment:
@@ -269,7 +309,9 @@ def initiate_mtn_payment(
     checkout_summary = build_checkout_summary(
         cart_items=cart_items,
         tenant=tenant,
-        shipping_method=shipping_method,
+        delivery_option=delivery_option,
+        pickup_station=pickup_station,
+        address=address,
         coupon_code=coupon_code,
     )
     amount = checkout_summary["total"]

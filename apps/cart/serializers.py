@@ -30,6 +30,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 class CartItemReadSerializer(serializers.ModelSerializer):
     variant = ProductVariantSerializer(read_only=True)
     product = ProductSerializer(source="variant.product", read_only=True)
+    product_image = serializers.SerializerMethodField()
     unit_price = serializers.ReadOnlyField()
     line_total = serializers.ReadOnlyField()
     is_available = serializers.ReadOnlyField()
@@ -39,6 +40,7 @@ class CartItemReadSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "product",
+            "product_image",
             "variant",
             "quantity",
             "unit_price",
@@ -48,6 +50,10 @@ class CartItemReadSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+    def get_product_image(self, obj):
+        product = getattr(getattr(obj, "variant", None), "product", None)
+        return getattr(product, "primary_image", None)
 
 
 class CartItemWriteSerializer(serializers.ModelSerializer):
