@@ -148,3 +148,4 @@ dmypy.json
 cython_debug/
 
 core/firebase/service-account.json
+commits.txt
