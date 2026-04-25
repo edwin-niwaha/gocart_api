@@ -54,6 +54,7 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     slug = serializers.CharField(required=False, allow_blank=True)
     category = CategorySerializer(read_only=True)
+    primary_image = serializers.ReadOnlyField()
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.filter(is_active=True),
         source="category",
@@ -76,6 +77,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "description",
             "hero_image",
             "image_urls",
+            "primary_image",
             "is_active",
             "is_featured",
             "base_price",

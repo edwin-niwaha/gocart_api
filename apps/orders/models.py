@@ -36,6 +36,10 @@ class Order(TimeStampedModel):
         CANCELLED = "CANCELLED", "Cancelled"
         REFUNDED = "REFUNDED", "Refunded"
 
+    class DeliveryOption(models.TextChoices):
+        HOME_DELIVERY = "HOME_DELIVERY", "Home delivery"
+        PICKUP_STATION = "PICKUP_STATION", "Pickup station"
+
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.CASCADE,
@@ -57,6 +61,19 @@ class Order(TimeStampedModel):
         null=True,
         blank=True,
     )
+    pickup_station = models.ForeignKey(
+        "shipping.PickupStation",
+        on_delete=models.PROTECT,
+        related_name="orders",
+        null=True,
+        blank=True,
+    )
+    pickup_station_name = models.CharField(max_length=255, blank=True)
+    pickup_station_city = models.CharField(max_length=100, blank=True)
+    pickup_station_area = models.CharField(max_length=100, blank=True)
+    pickup_station_address = models.TextField(blank=True)
+    pickup_station_phone = models.CharField(max_length=50, blank=True)
+    pickup_station_opening_hours = models.CharField(max_length=255, blank=True)
     guest_session_key = models.CharField(
         max_length=40,
         null=True,
@@ -68,6 +85,7 @@ class Order(TimeStampedModel):
     customer_phone = models.CharField(max_length=20, blank=True)
     address_street_name = models.CharField(max_length=255, blank=True)
     address_city = models.CharField(max_length=100, blank=True)
+    address_area = models.CharField(max_length=100, blank=True)
     address_region = models.CharField(
         max_length=30,
         choices=CustomerAddress.Region.choices,
@@ -80,6 +98,30 @@ class Order(TimeStampedModel):
         choices=Status.choices,
         default=Status.PENDING,
         db_index=True,
+    )
+    delivery_option = models.CharField(
+        max_length=20,
+        choices=DeliveryOption.choices,
+        default=DeliveryOption.HOME_DELIVERY,
+        db_index=True,
+    )
+    items_subtotal = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    discount_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+    )
+    shipping_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
     )
     description = models.TextField(blank=True)
     total_price = models.DecimalField(
@@ -118,10 +160,14 @@ class Order(TimeStampedModel):
         return self.slug
 
     def recalculate_total_price(self) -> Decimal:
-        total = sum((item.line_total for item in self.items.all()), Decimal("0.00"))
-        self.total_price = total
-        self.save(update_fields=["total_price", "updated_at"])
-        return total
+        subtotal = sum((item.line_total for item in self.items.all()), Decimal("0.00"))
+        self.items_subtotal = subtotal
+        self.total_price = (
+            max(subtotal - (self.discount_amount or Decimal("0.00")), Decimal("0.00"))
+            + (self.shipping_fee or Decimal("0.00"))
+        )
+        self.save(update_fields=["items_subtotal", "total_price", "updated_at"])
+        return subtotal
 
     @property
     def total_items(self) -> int:
@@ -149,6 +195,10 @@ class Order(TimeStampedModel):
         return self.address_city or getattr(self.address, "city", "")
 
     @property
+    def delivery_area(self) -> str:
+        return self.address_area or getattr(self.address, "area", "")
+
+    @property
     def delivery_region(self) -> str:
         return self.address_region or getattr(self.address, "region", "")
 
@@ -157,6 +207,38 @@ class Order(TimeStampedModel):
         return self.address_additional_information or getattr(
             self.address,
             "additional_information",
+            "",
+        )
+
+    @property
+    def delivery_pickup_station_name(self) -> str:
+        return self.pickup_station_name or getattr(self.pickup_station, "name", "")
+
+    @property
+    def delivery_pickup_station_city(self) -> str:
+        return self.pickup_station_city or getattr(self.pickup_station, "city", "")
+
+    @property
+    def delivery_pickup_station_area(self) -> str:
+        return self.pickup_station_area or getattr(self.pickup_station, "area", "")
+
+    @property
+    def delivery_pickup_station_address(self) -> str:
+        return self.pickup_station_address or getattr(
+            self.pickup_station,
+            "address",
+            "",
+        )
+
+    @property
+    def delivery_pickup_station_phone(self) -> str:
+        return self.pickup_station_phone or getattr(self.pickup_station, "phone", "")
+
+    @property
+    def delivery_pickup_station_opening_hours(self) -> str:
+        return self.pickup_station_opening_hours or getattr(
+            self.pickup_station,
+            "opening_hours",
             "",
         )
 

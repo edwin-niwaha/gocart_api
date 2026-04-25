@@ -10,6 +10,7 @@ class CustomerAddressSerializer(serializers.ModelSerializer):
             "id",
             "street_name",
             "city",
+            "area",
             "phone_number",
             "additional_telephone",
             "additional_information",
@@ -35,6 +36,9 @@ class CustomerAddressSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("City cannot be empty.")
         return value
+
+    def validate_area(self, value):
+        return value.strip()
 
     def validate(self, attrs):
         phone_number = attrs.get("phone_number")

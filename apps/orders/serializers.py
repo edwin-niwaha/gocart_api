@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.db.models import Q
 from rest_framework import serializers
 
 from apps.addresses.models import CustomerAddress
 from apps.payments.models import Payment
-from apps.shipping.models import ShippingMethod
+from apps.shipping.models import PickupStation
 from apps.tenants.utils import user_is_tenant_staff
 from .models import Order, OrderItem, OrderStatusEvent
 
@@ -48,11 +49,7 @@ class OrderItemReadSerializer(serializers.ModelSerializer):
         product = getattr(obj, "product", None)
         if not product:
             return None
-        if product.hero_image:
-            return product.hero_image
-        if product.image_urls:
-            return product.image_urls[0]
-        return None
+        return product.primary_image
 
 
 class OrderStatusEventSerializer(serializers.ModelSerializer):
@@ -77,9 +74,18 @@ class OrderReadSerializer(serializers.ModelSerializer):
     status_events = OrderStatusEventSerializer(many=True, read_only=True)
     user_email = serializers.SerializerMethodField()
     address_id = serializers.SerializerMethodField()
+    pickup_station_id = serializers.SerializerMethodField()
+    pickup_station_name = serializers.SerializerMethodField()
+    pickup_station_city = serializers.SerializerMethodField()
+    pickup_station_area = serializers.SerializerMethodField()
+    pickup_station_address = serializers.SerializerMethodField()
+    pickup_station_phone = serializers.SerializerMethodField()
+    pickup_station_opening_hours = serializers.SerializerMethodField()
     address_street_name = serializers.SerializerMethodField()
     address_city = serializers.SerializerMethodField()
+    address_area = serializers.SerializerMethodField()
     address_region = serializers.SerializerMethodField()
+    address_additional_information = serializers.SerializerMethodField()
     is_guest = serializers.SerializerMethodField()
 
     class Meta:
@@ -95,12 +101,25 @@ class OrderReadSerializer(serializers.ModelSerializer):
             "customer_phone",
             "is_guest",
             "status",
+            "delivery_option",
             "description",
+            "items_subtotal",
+            "discount_amount",
+            "shipping_fee",
             "total_price",
             "address_id",
+            "pickup_station_id",
+            "pickup_station_name",
+            "pickup_station_city",
+            "pickup_station_area",
+            "pickup_station_address",
+            "pickup_station_phone",
+            "pickup_station_opening_hours",
             "address_street_name",
             "address_city",
+            "address_area",
             "address_region",
+            "address_additional_information",
             "items",
             "status_events",
             "created_at",
@@ -114,14 +133,41 @@ class OrderReadSerializer(serializers.ModelSerializer):
     def get_address_id(self, obj: Order) -> int | None:
         return obj.address_id
 
+    def get_pickup_station_id(self, obj: Order) -> int | None:
+        return obj.pickup_station_id
+
+    def get_pickup_station_name(self, obj: Order) -> str:
+        return obj.delivery_pickup_station_name
+
+    def get_pickup_station_city(self, obj: Order) -> str:
+        return obj.delivery_pickup_station_city
+
+    def get_pickup_station_area(self, obj: Order) -> str:
+        return obj.delivery_pickup_station_area
+
+    def get_pickup_station_address(self, obj: Order) -> str:
+        return obj.delivery_pickup_station_address
+
+    def get_pickup_station_phone(self, obj: Order) -> str:
+        return obj.delivery_pickup_station_phone
+
+    def get_pickup_station_opening_hours(self, obj: Order) -> str:
+        return obj.delivery_pickup_station_opening_hours
+
     def get_address_street_name(self, obj: Order) -> str:
         return obj.delivery_street_name
 
     def get_address_city(self, obj: Order) -> str:
         return obj.delivery_city
 
+    def get_address_area(self, obj: Order) -> str:
+        return obj.delivery_area
+
     def get_address_region(self, obj: Order) -> str:
         return obj.delivery_region
+
+    def get_address_additional_information(self, obj: Order) -> str:
+        return obj.delivery_additional_information
 
     def get_is_guest(self, obj: Order) -> bool:
         return obj.user_id is None
@@ -131,6 +177,17 @@ class OrderCheckoutSerializer(serializers.Serializer):
     address_id = serializers.PrimaryKeyRelatedField(
         queryset=CustomerAddress.objects.all(),
         source="address",
+        required=False,
+        allow_null=True,
+    )
+    delivery_option = serializers.ChoiceField(
+        choices=Order.DeliveryOption.choices,
+        required=False,
+        default=Order.DeliveryOption.HOME_DELIVERY,
+    )
+    pickup_station_id = serializers.PrimaryKeyRelatedField(
+        queryset=PickupStation.objects.filter(is_active=True),
+        source="pickup_station",
         required=False,
         allow_null=True,
     )
@@ -149,6 +206,12 @@ class OrderCheckoutSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
     )
+    area = serializers.CharField(
+        source="address_area",
+        max_length=100,
+        required=False,
+        allow_blank=True,
+    )
     region = serializers.ChoiceField(
         source="address_region",
         choices=CustomerAddress.Region.choices,
@@ -161,12 +224,6 @@ class OrderCheckoutSerializer(serializers.Serializer):
         allow_blank=True,
     )
     description = serializers.CharField(required=False, allow_blank=True)
-    shipping_method_id = serializers.PrimaryKeyRelatedField(
-        queryset=ShippingMethod.objects.filter(is_active=True),
-        source="shipping_method",
-        required=False,
-        allow_null=True,
-    )
     coupon_code = serializers.CharField(
         max_length=50,
         required=False,
@@ -186,6 +243,14 @@ class OrderCheckoutSerializer(serializers.Serializer):
         default=Payment.Provider.CASH,
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        queryset = PickupStation.objects.filter(is_active=True)
+        if tenant is not None:
+            queryset = queryset.filter(Q(tenant=tenant) | Q(tenant__isnull=True))
+        self.fields["pickup_station_id"].queryset = queryset
+
     def validate_customer_name(self, value: str) -> str:
         return value.strip()
 
@@ -199,6 +264,9 @@ class OrderCheckoutSerializer(serializers.Serializer):
         return value.strip()
 
     def validate_city(self, value: str) -> str:
+        return value.strip()
+
+    def validate_area(self, value: str) -> str:
         return value.strip()
 
     def validate_payment_method(self, value: str) -> str:
@@ -217,10 +285,24 @@ class OrderCheckoutSerializer(serializers.Serializer):
     def validate(self, attrs):
         request = self.context["request"]
         address = attrs.get("address")
+        delivery_option = attrs.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = attrs.get("pickup_station")
+        errors = {}
+
+        if delivery_option == Order.DeliveryOption.PICKUP_STATION:
+            if pickup_station is None:
+                errors["pickup_station_id"] = "Pickup station is required."
+        else:
+            attrs["pickup_station"] = None
 
         if getattr(request.user, "is_authenticated", False):
             if address is None:
-                raise serializers.ValidationError({"address_id": "Address is required."})
+                errors["address_id"] = "Address is required."
+            if errors:
+                raise serializers.ValidationError(errors)
 
             address = _validate_order_address_owner(self, address)
             attrs["customer_name"] = (
@@ -232,11 +314,11 @@ class OrderCheckoutSerializer(serializers.Serializer):
             attrs["customer_phone"] = address.phone_number
             attrs["address_street_name"] = address.street_name
             attrs["address_city"] = address.city
+            attrs["address_area"] = address.area
             attrs["address_region"] = address.region
             attrs["address_additional_information"] = address.additional_information
             return attrs
 
-        errors = {}
         if address is not None:
             errors["address_id"] = "Guest checkout does not support saved addresses."
 

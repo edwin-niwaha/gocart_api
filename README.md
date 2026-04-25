@@ -84,7 +84,6 @@ The default local configuration uses SQLite. If you want PostgreSQL and Redis lo
 Windows PowerShell:
 
 ```powershell
-$env:DJANGO_SETTINGS_MODULE="core.settings.development"
 celery -A core worker -l info -P solo
 ```
 

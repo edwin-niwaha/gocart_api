@@ -32,6 +32,7 @@ class CustomerAddress(TimeStampedModel):
         verbose_name="Street Name / Building Number / Apartment",
     )
     city = models.CharField(max_length=100, db_index=True)
+    area = models.CharField(max_length=100, blank=True, db_index=True)
     phone_number = models.CharField(max_length=20, blank=True)
     additional_telephone = models.CharField(max_length=20, blank=True)
     additional_information = models.TextField(blank=True)
@@ -50,6 +51,7 @@ class CustomerAddress(TimeStampedModel):
         indexes = [
             models.Index(fields=["user", "-is_default", "-created_at"]),
             models.Index(fields=["user", "city"]),
+            models.Index(fields=["user", "area"], name="address_user_area_idx"),
             models.Index(fields=["user", "region"]),
         ]
         constraints = [

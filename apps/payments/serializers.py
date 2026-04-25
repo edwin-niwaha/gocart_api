@@ -1,8 +1,9 @@
+from django.db.models import Q
 from rest_framework import serializers
 
 from apps.addresses.models import CustomerAddress
 from apps.orders.models import Order
-from apps.shipping.models import ShippingMethod
+from apps.shipping.models import PickupStation
 
 from .models import Payment
 
@@ -49,9 +50,14 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
 class MTNInitiatePaymentSerializer(serializers.Serializer):
     address_id = serializers.IntegerField(min_value=1)
     phone_number = serializers.CharField(max_length=20)
-    shipping_method_id = serializers.PrimaryKeyRelatedField(
-        queryset=ShippingMethod.objects.filter(is_active=True),
-        source="shipping_method",
+    delivery_option = serializers.ChoiceField(
+        choices=Order.DeliveryOption.choices,
+        required=False,
+        default=Order.DeliveryOption.HOME_DELIVERY,
+    )
+    pickup_station_id = serializers.PrimaryKeyRelatedField(
+        queryset=PickupStation.objects.filter(is_active=True),
+        source="pickup_station",
         required=False,
         allow_null=True,
     )
@@ -61,6 +67,14 @@ class MTNInitiatePaymentSerializer(serializers.Serializer):
         allow_blank=True,
         trim_whitespace=True,
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        queryset = PickupStation.objects.filter(is_active=True)
+        if tenant is not None:
+            queryset = queryset.filter(Q(tenant=tenant) | Q(tenant__isnull=True))
+        self.fields["pickup_station_id"].queryset = queryset
 
     def validate_phone_number(self, value: str) -> str:
         raw = value.strip().replace(" ", "")
@@ -84,6 +98,11 @@ class MTNInitiatePaymentSerializer(serializers.Serializer):
     def validate(self, attrs):
         request = self.context["request"]
         address_id = attrs["address_id"]
+        delivery_option = attrs.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = attrs.get("pickup_station")
 
         try:
             address = CustomerAddress.objects.get(
@@ -94,6 +113,14 @@ class MTNInitiatePaymentSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"address_id": "Address not found."}
             )
+
+        if delivery_option == Order.DeliveryOption.PICKUP_STATION:
+            if pickup_station is None:
+                raise serializers.ValidationError(
+                    {"pickup_station_id": "Pickup station is required."}
+                )
+        else:
+            attrs["pickup_station"] = None
 
         self.context["address_instance"] = address
         return attrs

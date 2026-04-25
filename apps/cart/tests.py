@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from apps.common.guest_sessions import GUEST_SESSION_FLAG
 from apps.cart.models import Cart, CartItem
 from apps.products.models import Category, Product, ProductVariant
 from apps.tenants.models import Tenant, TenantMembership
@@ -79,6 +80,24 @@ class CartTenantIsolationTests(TestCase):
         self.assertEqual(response.data["items"][0]["variant"]["id"], self.variant_a.id)
         self.assertEqual(response.data["total_items"], 1)
         self.assertEqual(Decimal(str(response.data["total_price"])), Decimal("1000.00"))
+
+    def test_cart_response_includes_flat_and_nested_product_images(self):
+        self.product_a.hero_image = "https://cdn.example.com/apple-hero.jpg"
+        self.product_a.image_urls = ["https://cdn.example.com/apple-gallery.jpg"]
+        self.product_a.save(update_fields=["hero_image", "image_urls"])
+        CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=1, unit_price="1000.00")
+
+        response = self.client.post(
+            "/api/v1/cart/",
+            {},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant_a.slug,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.data["items"][0]
+        self.assertEqual(item["product_image"], "https://cdn.example.com/apple-hero.jpg")
+        self.assertEqual(item["product"]["primary_image"], "https://cdn.example.com/apple-hero.jpg")
 
     def test_tenant_staff_can_only_access_their_own_cart_items(self):
         staff = User.objects.create_user(
@@ -170,3 +189,27 @@ class GuestCartSessionTests(TestCase):
         cart = Cart.objects.get()
         self.assertIsNone(cart.user)
         self.assertTrue(cart.guest_session_key)
+
+    def test_cart_response_falls_back_to_first_gallery_image(self):
+        self.product.image_urls = [
+            "https://cdn.example.com/biscuits-1.jpg",
+            "https://cdn.example.com/biscuits-2.jpg",
+        ]
+        self.product.save(update_fields=["image_urls"])
+        session = self.client.session
+        session[GUEST_SESSION_FLAG] = True
+        session.save()
+        cart = Cart.objects.create(guest_session_key=session.session_key)
+        CartItem.objects.create(cart=cart, variant=self.variant, quantity=1, unit_price="2500.00")
+
+        response = self.client.post(
+            "/api/v1/cart/",
+            {},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.data["items"][0]
+        self.assertEqual(item["product_image"], "https://cdn.example.com/biscuits-1.jpg")
+        self.assertEqual(item["product"]["primary_image"], "https://cdn.example.com/biscuits-1.jpg")
