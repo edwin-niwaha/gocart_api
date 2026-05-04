@@ -6,6 +6,7 @@ from apps.cart.models import Cart, CartItem
 from apps.orders.models import Order
 from apps.payments.models import Payment
 from apps.products.models import Category, Product, ProductVariant
+from apps.shipping.models import DeliveryRate, ShippingMethod
 from apps.tenants.models import Tenant, TenantMembership
 
 User = get_user_model()
@@ -31,6 +32,7 @@ class UserEndpointPermissionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["email"], self.user.email)
+        self.assertEqual(response.data["results"][0]["memberships"], [])
 
     def test_tenant_staff_list_returns_tenant_members_only(self):
         self.client.force_authenticate(user=self.staff)
@@ -44,6 +46,8 @@ class UserEndpointPermissionTests(TestCase):
         other_payload = next(item for item in response.data["results"] if item["email"] == self.other.email)
         membership_slugs = {item["tenant"]["slug"] for item in other_payload["tenant_memberships"]}
         self.assertEqual(membership_slugs, {self.tenant.slug})
+        alias_slugs = {item["tenant"]["slug"] for item in other_payload["memberships"]}
+        self.assertEqual(alias_slugs, {self.tenant.slug})
 
 
 class GuestSessionClaimTests(TestCase):
@@ -87,6 +91,22 @@ class GuestSessionClaimTests(TestCase):
             price="6000.00",
             stock_quantity=20,
         )
+        ShippingMethod.objects.create(
+            name="Standard delivery",
+            description="Default shipping method for tests",
+            fee="5000.00",
+            estimated_days=2,
+            is_active=True,
+        )
+        DeliveryRate.objects.create(
+            tenant=self.tenant,
+            region="kampala_area",
+            city="",
+            area="",
+            fee="5000.00",
+            estimated_days=2,
+            is_active=True,
+        )
 
     def test_login_claims_guest_orders_payments_and_cart_items(self):
         add_checkout_item = self.client.post(
@@ -111,7 +131,7 @@ class GuestSessionClaimTests(TestCase):
             format="json",
             HTTP_X_TENANT_SLUG=self.tenant.slug,
         )
-        self.assertEqual(checkout_response.status_code, 201)
+        self.assertEqual(checkout_response.status_code, 201, checkout_response.data)
 
         order = Order.objects.get(slug=checkout_response.data["order"]["slug"])
         payment = Payment.objects.get(order=order)

@@ -91,7 +91,7 @@ macOS / Linux:
 
 ```bash
 export DJANGO_SETTINGS_MODULE=core.settings.development
-celery -A core worker -l info
+celery -A core worker -l info -P solo
 ```
 
 ## Docker

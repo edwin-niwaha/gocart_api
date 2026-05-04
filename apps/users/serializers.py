@@ -16,6 +16,7 @@ def normalize_email(value: str) -> str:
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     tenant_memberships = serializers.SerializerMethodField()
+    memberships = serializers.SerializerMethodField()
     active_tenant_slug = serializers.SerializerMethodField()
 
     class Meta:
@@ -31,6 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_email_verified",
             "active_tenant_slug",
+            "memberships",
             "tenant_memberships",
             "created_at",
         )
@@ -41,10 +43,12 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "is_email_verified",
             "active_tenant_slug",
+            "memberships",
             "tenant_memberships",
             "created_at",
             "avatar_url",
             "active_tenant_slug",
+            "memberships",
             "tenant_memberships",
         )
 
@@ -58,6 +62,12 @@ class UserSerializer(serializers.ModelSerializer):
         return tenant.slug if tenant else None
 
     def get_tenant_memberships(self, obj):
+        return self._serialize_memberships(obj)
+
+    def get_memberships(self, obj):
+        return self._serialize_memberships(obj)
+
+    def _serialize_memberships(self, obj):
         request = self.context.get("request")
         if request is None:
             return TenantMembershipSerializer(
