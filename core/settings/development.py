@@ -9,9 +9,17 @@ ENVIRONMENT = "development"
 ALLOWED_HOSTS = ALLOWED_HOSTS or ["127.0.0.1", "localhost", "[::1]"]
 ALLOWED_HOSTS += [
     host
+    for host in ["10.0.2.2", "0.0.0.0"]
+    if host not in ALLOWED_HOSTS
+]
+ALLOWED_HOSTS += [
+    host
     for host in env_list("DEV_ALLOWED_HOSTS")
     if host not in ALLOWED_HOSTS
 ]
+
+if env_bool("DEV_ALLOW_ALL_HOSTS", True):
+    ALLOWED_HOSTS = ["*"]
 
 # ------------------------------------------------------------------------------
 # DATABASE
