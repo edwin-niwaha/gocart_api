@@ -1,0 +1,8 @@
+Create a Pull Request / Merge Request:
+
+from: production-readiness
+into: main
+
+Bash
+git checkout main
+git pull origin main

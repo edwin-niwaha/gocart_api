@@ -396,12 +396,6 @@ class OrderViewSet(viewsets.ModelViewSet):
 
                 locked_variants[cart_item.id] = variant
 
-            order_status = (
-                Order.Status.PENDING
-                if payment_method == Payment.Provider.CASH
-                else Order.Status.AWAITING_PAYMENT
-            )
-
             order = create_order(
                 user=request.user if is_authenticated else None,
                 tenant=tenant,
@@ -419,7 +413,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                     "",
                 ),
                 description=description or "Placed from checkout",
-                status=order_status,
+                status=Order.Status.PENDING,
                 delivery_option=delivery_option,
                 pickup_station=pickup_station,
             )
@@ -493,18 +487,6 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "pickup_station_id": pickup_station.id if pickup_station is not None else None,
             }
 
-            payment_status = (
-                Payment.Status.PENDING
-                if payment_method == Payment.Provider.CASH
-                else Payment.Status.PROCESSING
-            )
-
-            payment_note = (
-                "Pay on delivery selected at checkout"
-                if payment_method == Payment.Provider.CASH
-                else f"{payment_method} selected at checkout"
-            )
-
             payment = Payment.objects.create(
                 tenant=tenant,
                 user=request.user if is_authenticated else None,
@@ -513,10 +495,10 @@ class OrderViewSet(viewsets.ModelViewSet):
                 provider=payment_method,
                 amount=order.total_price,
                 currency=Payment.Currency.UGX,
-                status=payment_status,
+                status=Payment.Status.PENDING,
                 provider_response={
                     "payment_method": payment_method,
-                    "payment_note": payment_note,
+                    "payment_note": "Pay on delivery selected at checkout",
                     "idempotency_key": idempotency_key,
                     "checkout_summary": checkout_summary,
                 },

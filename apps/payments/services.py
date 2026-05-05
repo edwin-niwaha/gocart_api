@@ -52,6 +52,19 @@ def validate_momo_configuration() -> None:
         )
 
 
+def validate_card_payment_configuration() -> None:
+    if not getattr(settings, "ENABLE_CARD_PAYMENTS", False):
+        raise ValidationError({"detail": "Card payments are not enabled."})
+
+    if not getattr(settings, "CARD_PAYMENT_GATEWAY_CHECKOUT_URL", ""):
+        raise ValidationError(
+            {
+                "detail": "Card payments are not configured.",
+                "missing_settings": ["CARD_PAYMENT_GATEWAY_CHECKOUT_URL"],
+            }
+        )
+
+
 def momo_headers(
     subscription_key: str,
     token: str | None = None,
@@ -386,6 +399,80 @@ def initiate_mtn_payment(
             "provider_status_code": result["status_code"],
         }
     )
+
+
+def initiate_card_payment(
+    *,
+    user,
+    address,
+    tenant=None,
+    delivery_option: str = Order.DeliveryOption.HOME_DELIVERY,
+    pickup_station=None,
+    coupon_code: str = "",
+    gateway: str = "",
+    cardholder_name: str = "",
+    card_last4: str = "",
+    expiry_month: int | None = None,
+    expiry_year: int | None = None,
+    billing_email: str = "",
+    billing_phone: str = "",
+    idempotency_key: str = "",
+) -> Payment:
+    validate_card_payment_configuration()
+
+    cart_items = get_user_cart_items(user=user, tenant=tenant)
+    if get_cart_total_from_items(cart_items) <= Decimal("0.00"):
+        raise ValidationError({"detail": "Your cart is empty."})
+
+    checkout_summary = build_checkout_summary(
+        cart_items=cart_items,
+        tenant=tenant,
+        delivery_option=delivery_option,
+        pickup_station=pickup_station,
+        address=address,
+        coupon_code=coupon_code,
+    )
+    amount = checkout_summary["total"]
+    cart_snapshot = build_cart_snapshot(cart_items)
+    serialized_summary = serialize_checkout_summary(checkout_summary)
+    gateway_name = gateway or getattr(settings, "CARD_PAYMENT_GATEWAY", "placeholder")
+
+    # TODO: Replace this placeholder with a PCI-compliant gateway integration
+    # (for example Flutterwave, Stripe, Pesapal, or DPO). The backend must
+    # accept a provider token/hosted checkout callback, never raw PAN or CVV.
+    payment = Payment.objects.create(
+        tenant=tenant,
+        user=user,
+        order=None,
+        provider=Payment.Provider.CARD,
+        amount=amount,
+        currency=Payment.Currency.UGX,
+        status=Payment.Status.PROCESSING,
+        checkout_url=getattr(settings, "CARD_PAYMENT_GATEWAY_CHECKOUT_URL", ""),
+        provider_response={
+            "address_id": address.id,
+            "idempotency_key": idempotency_key,
+            "cart_snapshot": cart_snapshot,
+            "cart_total": str(checkout_summary["items_subtotal"]),
+            "checkout_summary": serialized_summary,
+            "gateway": gateway_name,
+            "card": {
+                "cardholder_name": cardholder_name,
+                "last4": card_last4,
+                "expiry_month": expiry_month,
+                "expiry_year": expiry_year,
+            },
+            "billing": {
+                "email": billing_email,
+                "phone": billing_phone,
+            },
+            "integration_status": "placeholder_checkout_created",
+        },
+    )
+
+    return payment
+
+
 def check_status(reference_id: str) -> dict:
     access_token = create_access_token()
     url = f"{settings.MOMO_BASE_URL}/collection/v1_0/requesttopay/{reference_id}"

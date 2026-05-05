@@ -20,11 +20,17 @@ from apps.shipping.models import PickupStation
 from rest_framework import generics
 
 from .models import Payment
-from .serializers import MTNInitiatePaymentSerializer, PaymentStatusSerializer, PaymentListSerializer
+from .serializers import (
+    CardInitiatePaymentSerializer,
+    MTNInitiatePaymentSerializer,
+    PaymentListSerializer,
+    PaymentStatusSerializer,
+)
 from .services import (
     build_cart_snapshot,
     get_expected_total_from_payment_summary,
     get_cart_total_from_items,
+    initiate_card_payment,
     initiate_mtn_payment,
     refresh_mtn_payment_status,
     user_has_cart_items,
@@ -125,6 +131,88 @@ class MTNInitiatePaymentView(APIView):
             {
                 "reference": payment.reference,
                 "external_id": payment.external_id,
+                "status": payment.status,
+                "amount": payment.amount,
+                "currency": payment.currency,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CardInitiatePaymentView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        idempotency_key = get_idempotency_key(request)
+        if idempotency_key:
+            existing_payment = (
+                Payment.objects.filter(
+                    tenant=request.tenant,
+                    user=request.user,
+                    provider=Payment.Provider.CARD,
+                    provider_response__idempotency_key=idempotency_key,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if existing_payment is not None:
+                return Response(
+                    {
+                        "reference": existing_payment.reference,
+                        "checkout_url": existing_payment.checkout_url or None,
+                        "status": existing_payment.status,
+                        "amount": existing_payment.amount,
+                        "currency": existing_payment.currency,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        serializer = CardInitiatePaymentSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        if not user_has_cart_items(request.user, request.tenant):
+            raise ValidationError({"detail": "Your cart is empty."})
+
+        address = serializer.context["address_instance"]
+        delivery_option = serializer.validated_data.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = serializer.validated_data.get("pickup_station")
+        coupon_code = serializer.validated_data.get("coupon_code", "")
+
+        payment = initiate_card_payment(
+            user=request.user,
+            address=address,
+            tenant=request.tenant,
+            delivery_option=delivery_option,
+            pickup_station=pickup_station,
+            coupon_code=coupon_code,
+            gateway=serializer.validated_data.get("gateway", ""),
+            cardholder_name=serializer.validated_data["cardholder_name"],
+            card_last4=serializer.validated_data["card_last4"],
+            expiry_month=serializer.validated_data["expiry_month"],
+            expiry_year=serializer.validated_data["expiry_year"],
+            billing_email=serializer.validated_data.get("billing_email", ""),
+            billing_phone=serializer.validated_data.get("billing_phone", ""),
+            idempotency_key=idempotency_key,
+        )
+        logger.info(
+            "Card payment initialized payment_id=%s user_id=%s tenant_id=%s amount=%s request_id=%s",
+            payment.id,
+            request.user.id,
+            getattr(request.tenant, "id", None),
+            payment.amount,
+            getattr(request, "id", ""),
+        )
+
+        return Response(
+            {
+                "reference": payment.reference,
+                "checkout_url": payment.checkout_url or None,
                 "status": payment.status,
                 "amount": payment.amount,
                 "currency": payment.currency,
@@ -319,7 +407,7 @@ class FinalizePaidOrderView(APIView):
                 user=request.user,
                 tenant=request.tenant,
                 address=address,
-                description="Placed after successful mobile money payment",
+                description="Placed after successful online payment",
                 status=Order.Status.PAID,
                 delivery_option=delivery_option,
                 pickup_station=pickup_station,

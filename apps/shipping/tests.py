@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from decimal import Decimal
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
@@ -178,7 +179,38 @@ class DeliveryRatePricingTests(TestCase):
             region_rate.id,
         )
 
-    def test_home_delivery_fee_requires_matching_rate(self):
+    def test_delivery_rate_resolution_falls_back_to_broad_tenant_rate(self):
+        broad_rate = DeliveryRate.objects.create(
+            tenant=self.tenant,
+            region=CustomerAddress.Region.CENTRAL_REGION,
+            city="",
+            area="",
+            fee="7000.00",
+            estimated_days=3,
+            is_active=True,
+        )
+
+        rate = resolve_checkout_delivery_rate(
+            tenant=self.tenant,
+            delivery_option=Order.DeliveryOption.HOME_DELIVERY,
+            address_region=CustomerAddress.Region.WESTERN_REGION,
+            address_city="Mbarara",
+            address_area="Kakoba",
+        )
+
+        self.assertEqual(rate, broad_rate)
+        self.assertEqual(
+            get_checkout_shipping_fee(
+                tenant=self.tenant,
+                delivery_option=Order.DeliveryOption.HOME_DELIVERY,
+                address_region=CustomerAddress.Region.WESTERN_REGION,
+                address_city="Mbarara",
+                address_area="Kakoba",
+            ),
+            Decimal("7000.00"),
+        )
+
+    def test_home_delivery_fee_requires_any_active_rate(self):
         with self.assertRaisesMessage(
             ValidationError,
             "Delivery is not available for this location.",

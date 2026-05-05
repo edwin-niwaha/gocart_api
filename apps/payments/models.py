@@ -14,11 +14,11 @@ from apps.tenants.models import Tenant
 class Payment(TimeStampedModel):
     class Provider(models.TextChoices):
         CASH = "CASH", "Cash"
+        CARD = "CARD", "Bank / Debit Card"
         STRIPE = "STRIPE", "Stripe"
         PAYSTACK = "PAYSTACK", "Paystack"
         FLUTTERWAVE = "FLUTTERWAVE", "Flutterwave"
         MTN = "MTN", "MTN Mobile Money"
-        AIRTEL = "AIRTEL", "Airtel Money"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
