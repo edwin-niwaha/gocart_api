@@ -51,7 +51,31 @@ def resolve_checkout_delivery_rate(
         if city_rate is not None:
             return city_rate
 
-    return rates.filter(city="", area="").first()
+    region_rate = rates.filter(city="", area="").first()
+    if region_rate is not None:
+        return region_rate
+
+    # Jumia-style coverage fallback: if the exact customer location is not
+    # priced yet, use the broadest active tenant rate instead of blocking
+    # checkout. Operators can still add exact city/area rates to override it.
+    broad_rate = (
+        DeliveryRate.objects.filter(
+            tenant=tenant,
+            is_active=True,
+            city="",
+            area="",
+        )
+        .order_by("fee", "estimated_days", "id")
+        .first()
+    )
+    if broad_rate is not None:
+        return broad_rate
+
+    return (
+        DeliveryRate.objects.filter(tenant=tenant, is_active=True)
+        .order_by("fee", "estimated_days", "id")
+        .first()
+    )
 
 
 def resolve_checkout_shipping_method(*, delivery_option: str) -> ShippingMethod | None:

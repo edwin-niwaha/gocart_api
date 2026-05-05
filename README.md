@@ -17,7 +17,7 @@ GoCart API powers a multi-tenant commerce platform with support for:
 - tenant-scoped catalog, carts, orders, addresses, reviews, and wishlists
 - guest and authenticated checkout flows
 - coupon and shipping-aware totals
-- MTN Mobile Money payment workflows plus cash-on-delivery support
+- MTN Mobile Money, hosted bank card placeholder workflows, and cash-on-delivery support
 - push notifications, support messaging, newsletters, and audit logs
 - tenant branding, memberships, settings, and feature flags
 - admin dashboard analytics and health checks
@@ -35,7 +35,7 @@ GoCart API powers a multi-tenant commerce platform with support for:
 | Database | SQLite by default, PostgreSQL in Docker / production |
 | Media | Cloudinary |
 | Notifications | Firebase Admin |
-| Payments | MTN Mobile Money integrations |
+| Payments | MTN Mobile Money and hosted card gateway placeholder integrations |
 
 ## Key Features
 
@@ -120,6 +120,9 @@ Important settings include:
 - `ENABLE_EMAIL`
 - `ENABLE_FIREBASE`
 - `ENABLE_MOMO`
+- `ENABLE_CARD_PAYMENTS`
+- `CARD_PAYMENT_GATEWAY`
+- `CARD_PAYMENT_GATEWAY_CHECKOUT_URL`
 - `ENABLE_CLOUDINARY`
 - `ENABLED_CHECKOUT_PAYMENT_METHODS`
 - `TIME_ZONE`
@@ -148,6 +151,7 @@ curl http://127.0.0.1:8000/api/v1/products/ \
 - `POST /api/v1/cart-items/`
 - `POST /api/v1/orders/checkout/`
 - `POST /api/v1/payments/mtn/initiate/`
+- `POST /api/v1/payments/card/initiate/`
 - `POST /api/v1/notifications/broadcast/`
 - `GET /api/v1/admin/dashboard/summary/`
 
@@ -185,7 +189,8 @@ gunicorn core.wsgi:application --config gunicorn.conf.py
 
 - Run a separate Celery worker for background jobs.
 - Back the app with PostgreSQL and Redis in production.
-- Enable Firebase, Cloudinary, email, and mobile money only when the required credentials are configured.
+- Enable Firebase, Cloudinary, email, mobile money, and card payments only when the required credentials or hosted checkout URL are configured.
+- Card payments must use a PCI-compliant hosted or tokenized gateway integration. Do not send raw card numbers or CVV values to this API.
 
 ## License
 

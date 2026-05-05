@@ -1,3 +1,5 @@
+import json
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -246,6 +248,151 @@ class PaymentFinalizeSafetyTests(TestCase):
         )
         request_to_pay.assert_called_once()
         self.assertEqual(request_to_pay.call_args.kwargs["amount"], Decimal("2000.00"))
+
+    @override_settings(
+        ENABLE_CARD_PAYMENTS=True,
+        CARD_PAYMENT_GATEWAY="placeholder",
+        CARD_PAYMENT_GATEWAY_CHECKOUT_URL="https://payments.example.test/checkout",
+    )
+    def test_card_initiation_creates_placeholder_without_sensitive_card_data(self):
+        CartItem.objects.create(
+            cart=self.cart,
+            variant=self.variant,
+            quantity=2,
+            unit_price="1000.00",
+        )
+
+        response = self.client.post(
+            "/api/v1/payments/card/initiate/",
+            {
+                "address_id": self.address.id,
+                "cardholder_name": "Jane Buyer",
+                "card_last4": "4242",
+                "expiry_month": 12,
+                "expiry_year": timezone.now().year + 1,
+                "billing_email": "jane@example.com",
+                "billing_phone": "0772123456",
+            },
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["checkout_url"], "https://payments.example.test/checkout")
+        payment = Payment.objects.get(reference=response.data["reference"])
+        provider_response = json.dumps(payment.provider_response)
+
+        self.assertEqual(payment.provider, Payment.Provider.CARD)
+        self.assertEqual(payment.status, Payment.Status.PROCESSING)
+        self.assertEqual(payment.amount, Decimal("2000.00"))
+        self.assertEqual(payment.provider_response["card"]["last4"], "4242")
+        self.assertNotIn("card_number", provider_response)
+        self.assertNotIn("cvv", provider_response)
+        self.assertNotIn("4242424242424242", provider_response)
+
+    @override_settings(
+        ENABLE_CARD_PAYMENTS=True,
+        CARD_PAYMENT_GATEWAY="placeholder",
+        CARD_PAYMENT_GATEWAY_CHECKOUT_URL="https://payments.example.test/checkout",
+    )
+    def test_card_initiation_rejects_raw_card_number_and_cvv(self):
+        CartItem.objects.create(
+            cart=self.cart,
+            variant=self.variant,
+            quantity=2,
+            unit_price="1000.00",
+        )
+
+        response = self.client.post(
+            "/api/v1/payments/card/initiate/",
+            {
+                "address_id": self.address.id,
+                "cardholder_name": "Jane Buyer",
+                "card_last4": "4242",
+                "expiry_month": 12,
+                "expiry_year": timezone.now().year + 1,
+                "card_number": "4242424242424242",
+                "cvv": "123",
+            },
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("PCI-compliant gateway", str(response.data))
+        self.assertFalse(Payment.objects.exists())
+
+    @override_settings(
+        ENABLE_CARD_PAYMENTS=True,
+        CARD_PAYMENT_GATEWAY="placeholder",
+        CARD_PAYMENT_GATEWAY_CHECKOUT_URL="https://payments.example.test/checkout",
+    )
+    def test_card_initiation_idempotency_replays_existing_payment(self):
+        CartItem.objects.create(
+            cart=self.cart,
+            variant=self.variant,
+            quantity=2,
+            unit_price="1000.00",
+        )
+        payload = {
+            "address_id": self.address.id,
+            "cardholder_name": "Jane Buyer",
+            "card_last4": "4242",
+            "expiry_month": 12,
+            "expiry_year": timezone.now().year + 1,
+        }
+        headers = {
+            "HTTP_X_TENANT_SLUG": self.tenant.slug,
+            "HTTP_IDEMPOTENCY_KEY": "card-initiate-key-001",
+        }
+
+        first_response = self.client.post(
+            "/api/v1/payments/card/initiate/",
+            payload,
+            format="json",
+            **headers,
+        )
+        second_response = self.client.post(
+            "/api/v1/payments/card/initiate/",
+            payload,
+            format="json",
+            **headers,
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(first_response.data["reference"], second_response.data["reference"])
+        self.assertEqual(Payment.objects.count(), 1)
+
+    @override_settings(
+        ENABLE_CARD_PAYMENTS=True,
+        CARD_PAYMENT_GATEWAY="placeholder",
+        CARD_PAYMENT_GATEWAY_CHECKOUT_URL="",
+    )
+    def test_card_initiation_requires_gateway_configuration(self):
+        CartItem.objects.create(
+            cart=self.cart,
+            variant=self.variant,
+            quantity=2,
+            unit_price="1000.00",
+        )
+
+        response = self.client.post(
+            "/api/v1/payments/card/initiate/",
+            {
+                "address_id": self.address.id,
+                "cardholder_name": "Jane Buyer",
+                "card_last4": "4242",
+                "expiry_month": 12,
+                "expiry_year": timezone.now().year + 1,
+            },
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Card payments are not configured", str(response.data))
+        self.assertFalse(Payment.objects.exists())
 
     def test_finalize_paid_payment_applies_stored_coupon_and_shipping_total(self):
         CartItem.objects.create(

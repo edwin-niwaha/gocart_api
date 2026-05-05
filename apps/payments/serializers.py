@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.addresses.models import CustomerAddress
@@ -127,6 +128,98 @@ class MTNInitiatePaymentSerializer(serializers.Serializer):
 
     def validate_coupon_code(self, value: str) -> str:
         return value.strip().upper()
+
+
+class CardInitiatePaymentSerializer(serializers.Serializer):
+    address_id = serializers.IntegerField(min_value=1)
+    delivery_option = serializers.ChoiceField(
+        choices=Order.DeliveryOption.choices,
+        required=False,
+        default=Order.DeliveryOption.HOME_DELIVERY,
+    )
+    pickup_station_id = serializers.PrimaryKeyRelatedField(
+        queryset=PickupStation.objects.filter(is_active=True),
+        source="pickup_station",
+        required=False,
+        allow_null=True,
+    )
+    coupon_code = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+    )
+    gateway = serializers.CharField(max_length=40, required=False, allow_blank=True)
+    cardholder_name = serializers.CharField(max_length=120)
+    card_last4 = serializers.RegexField(regex=r"^\d{4}$")
+    expiry_month = serializers.IntegerField(min_value=1, max_value=12)
+    expiry_year = serializers.IntegerField(min_value=2024, max_value=2100)
+    billing_email = serializers.EmailField(required=False, allow_blank=True)
+    billing_phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        tenant = getattr(self.context.get("request"), "tenant", None)
+        queryset = PickupStation.objects.filter(is_active=True)
+        if tenant is not None:
+            queryset = queryset.filter(Q(tenant=tenant) | Q(tenant__isnull=True))
+        self.fields["pickup_station_id"].queryset = queryset
+
+    def validate_coupon_code(self, value: str) -> str:
+        return value.strip().upper()
+
+    def validate_gateway(self, value: str) -> str:
+        return value.strip().lower()
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        address_id = attrs["address_id"]
+        delivery_option = attrs.get(
+            "delivery_option",
+            Order.DeliveryOption.HOME_DELIVERY,
+        )
+        pickup_station = attrs.get("pickup_station")
+        now = timezone.now()
+        expiry_year = attrs.get("expiry_year")
+        expiry_month = attrs.get("expiry_month")
+
+        if expiry_year < now.year or (
+            expiry_year == now.year and expiry_month < now.month
+        ):
+            raise serializers.ValidationError(
+                {"expiry_year": "Card expiry date is in the past."}
+            )
+
+        blocked_fields = {"card_number", "number", "pan", "cvv", "cvc", "security_code"}
+        leaked_fields = blocked_fields.intersection(set(self.initial_data.keys()))
+        if leaked_fields:
+            raise serializers.ValidationError(
+                {
+                    "detail": "Raw card number and CVV must be tokenized by a PCI-compliant gateway, not sent to GoCart.",
+                    "blocked_fields": sorted(leaked_fields),
+                }
+            )
+
+        try:
+            address = CustomerAddress.objects.get(
+                id=address_id,
+                user=request.user,
+            )
+        except CustomerAddress.DoesNotExist:
+            raise serializers.ValidationError(
+                {"address_id": "Address not found."}
+            )
+
+        if delivery_option == Order.DeliveryOption.PICKUP_STATION:
+            if pickup_station is None:
+                raise serializers.ValidationError(
+                    {"pickup_station_id": "Pickup station is required."}
+                )
+        else:
+            attrs["pickup_station"] = None
+
+        self.context["address_instance"] = address
+        return attrs
 
 
 class PaymentStatusSerializer(serializers.ModelSerializer):

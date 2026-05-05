@@ -299,7 +299,7 @@ class OrderTenantCheckoutTests(TestCase):
         self.assertEqual(self.variant_a.stock_quantity, 1)
 
     @override_settings(ENABLED_CHECKOUT_PAYMENT_METHODS=["CASH", "MTN"])
-    def test_checkout_mtn_creates_awaiting_payment_without_provider_call(self):
+    def test_checkout_rejects_online_payment_methods(self):
         CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")
 
         response = self.client.post(
@@ -313,16 +313,10 @@ class OrderTenantCheckoutTests(TestCase):
             HTTP_X_TENANT_SLUG=self.tenant_a.slug,
         )
 
-        self.assertEqual(response.status_code, 201)
-        order = Order.objects.get(slug=response.data["order"]["slug"])
-        payment = Payment.objects.get(order=order)
-        self.assertEqual(order.status, Order.Status.AWAITING_PAYMENT)
-        self.assertEqual(order.items_subtotal, Decimal("2000.00"))
-        self.assertEqual(order.discount_amount, Decimal("0.00"))
-        self.assertEqual(order.shipping_fee, Decimal("0.00"))
-        self.assertEqual(payment.provider, Payment.Provider.MTN)
-        self.assertEqual(payment.status, Payment.Status.PROCESSING)
-        self.assertEqual(payment.amount, order.total_price)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("dedicated payment initiation endpoint", str(response.data))
+        self.assertFalse(Order.objects.exists())
+        self.assertFalse(Payment.objects.exists())
 
     def test_checkout_summary_uses_address_based_delivery_rate(self):
         CartItem.objects.create(cart=self.cart, variant=self.variant_a, quantity=2, unit_price="1000.00")

@@ -231,14 +231,7 @@ class OrderCheckoutSerializer(serializers.Serializer):
         trim_whitespace=True,
     )
     payment_method = serializers.ChoiceField(
-        choices=[
-            Payment.Provider.CASH,
-            Payment.Provider.STRIPE,
-            Payment.Provider.PAYSTACK,
-            Payment.Provider.FLUTTERWAVE,
-            Payment.Provider.MTN,
-            Payment.Provider.AIRTEL,
-        ],
+        choices=Payment.Provider.choices,
         required=False,
         default=Payment.Provider.CASH,
     )
@@ -273,9 +266,9 @@ class OrderCheckoutSerializer(serializers.Serializer):
         enabled_methods = set(
             getattr(settings, "ENABLED_CHECKOUT_PAYMENT_METHODS", ["CASH"])
         )
-        if value not in enabled_methods:
+        if value != Payment.Provider.CASH or value not in enabled_methods:
             raise serializers.ValidationError(
-                "This payment method is not enabled for checkout."
+                "Use the dedicated payment initiation endpoint for online payments."
             )
         return value
 
