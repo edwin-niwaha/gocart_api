@@ -1,13 +1,50 @@
 from django.db.models import Prefetch
 from django_filters.rest_framework import DjangoFilterBackend
+import json
 from rest_framework import filters, status, viewsets
 from rest_framework.response import Response
 
 from apps.tenants.permissions import IsTenantAdminOrReadOnly
 from apps.tenants.utils import user_is_tenant_staff
-from .models import Category, Product, ProductVariant
-from .serializers import CategorySerializer, ProductSerializer
+from .models import Category, Product, ProductImage, ProductVariant
+from .serializers import (
+    CategorySerializer,
+    ProductSerializer,
+)
 from .services import create_category, create_product, update_category, update_product
+
+
+def normalize_product_payload(request):
+    if hasattr(request, "POST") and request.POST:
+        data = {
+            key: values[-1] if len(values) == 1 else values
+            for key, values in request.POST.lists()
+        }
+    else:
+        data = dict(request.data)
+
+    hero_image = request.FILES.get("hero_image")
+    if hero_image is not None:
+        data["hero_image"] = hero_image
+
+    images_payload = data.pop("images_payload", None)
+    if images_payload:
+        raw_payload = images_payload[0] if isinstance(images_payload, list) else images_payload
+        image_items = json.loads(raw_payload or "[]")
+
+        for index, item in enumerate(image_items):
+            uploaded_image = request.FILES.get(f"image_file_{index}")
+            if uploaded_image is not None:
+                item["image"] = uploaded_image
+
+        data["images"] = image_items
+
+    variants_payload = data.pop("variants_payload", None)
+    if variants_payload:
+        raw_payload = variants_payload[0] if isinstance(variants_payload, list) else variants_payload
+        data["variants"] = json.loads(raw_payload or "[]")
+
+    return data
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -72,6 +109,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         tenant = self.request.tenant
+
         base_queryset = Product.objects.select_related(
             "tenant",
             "category",
@@ -79,19 +117,36 @@ class ProductViewSet(viewsets.ModelViewSet):
         ).filter(tenant=tenant).order_by("-created_at")
 
         if user_is_tenant_staff(self.request.user, tenant):
-            return base_queryset.prefetch_related("variants")
+            return base_queryset.prefetch_related(
+                "variants",
+                "images",
+            )
 
         active_variants = Prefetch(
             "variants",
-            queryset=ProductVariant.objects.filter(tenant=tenant, is_active=True).order_by(
+            queryset=ProductVariant.objects.filter(
+                tenant=tenant,
+                is_active=True,
+            ).order_by(
                 "sort_order",
                 "price",
                 "id",
             ),
         )
 
+        active_images = Prefetch(
+            "images",
+            queryset=ProductImage.objects.filter(
+                tenant=tenant,
+                is_active=True,
+            ).order_by(
+                "sort_order",
+                "id",
+            ),
+        )
+
         return (
-            base_queryset.prefetch_related(active_variants)
+            base_queryset.prefetch_related(active_variants, active_images)
             .filter(
                 is_active=True,
                 category__is_active=True,
@@ -101,8 +156,9 @@ class ProductViewSet(viewsets.ModelViewSet):
             .distinct()
         )
 
+
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(data=normalize_product_payload(request))
         serializer.is_valid(raise_exception=True)
 
         product = create_product(tenant=request.tenant, **serializer.validated_data)
@@ -112,7 +168,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer = self.get_serializer(
+            instance,
+            data=normalize_product_payload(request),
+            partial=partial,
+        )
         serializer.is_valid(raise_exception=True)
 
         product = update_product(instance=instance, **serializer.validated_data)
