@@ -133,6 +133,25 @@ class Product(TimeStampedModel):
         return None
 
     @property
+    def image_urls(self) -> list[str]:
+        """Return list of all active product image URLs, with hero image first if present."""
+        urls = []
+
+        # Add hero image first if it exists
+        if self.hero_image:
+            urls.append(self.hero_image.url)
+
+        # Add gallery images
+        gallery_urls = [
+            img.image.url
+            for img in self.images.filter(is_active=True).order_by("sort_order", "id")
+            if img.image
+        ]
+        urls.extend(gallery_urls)
+
+        return urls
+    
+    @property
     def base_price(self):
         first_variant = self.variants.filter(is_active=True).order_by("price").first()  # type: ignore[attr-defined]
         return first_variant.price if first_variant else Decimal("0.00")
