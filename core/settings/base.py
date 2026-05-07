@@ -383,3 +383,6 @@ if SENTRY_DSN:
 
 # Frontend URL for email templates and other references
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+
+# Backend URL for API calls from the frontend (if different from FRONTEND_BASE_URL)
+BACKEND_URL = os.getenv("BACKEND_URL", default="http://127.0.0.1:8000")

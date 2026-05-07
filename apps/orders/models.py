@@ -310,11 +310,31 @@ class OrderItem(TimeStampedModel):
     def _get_snapshot_product_image(self) -> str | None:
         if not self.variant_id:
             return None
+
         product = self.variant.product
+
         if product.hero_image:
-            return product.hero_image
+            try:
+                url = product.hero_image.url
+            except Exception:
+                return None
+
+            if not url:
+                return None
+
+            if url.startswith("http://") or url.startswith("https://"):
+                return url
+
+            return f"{settings.BACKEND_URL.rstrip('/')}{url}"
+
         if isinstance(product.image_urls, list) and product.image_urls:
-            return product.image_urls[0] or None
+            image = product.image_urls[0]
+
+            if image.startswith("http://") or image.startswith("https://"):
+                return image
+
+            return f"{settings.BACKEND_URL.rstrip('/')}{image}"
+
         return None
 
     def save(self, *args, **kwargs):
