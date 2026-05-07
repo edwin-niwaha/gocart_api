@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from cloudinary.models import CloudinaryField
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -15,9 +16,24 @@ class Category(TimeStampedModel):
         null=True,
         blank=True,
     )
+
     name = models.CharField(max_length=255, db_index=True)
     slug = models.SlugField(max_length=255, db_index=True)
-    image_url = models.URLField(blank=True, null=True)
+
+    image = CloudinaryField(
+        "category_image",
+        folder="gocart/categories",
+        transformation={
+            "width": 800,
+            "height": 800,
+            "crop": "fill",
+            "quality": "auto",
+            "fetch_format": "auto",
+        },
+        blank=True,
+        null=True,
+    )
+
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -37,9 +53,20 @@ class Category(TimeStampedModel):
     def __str__(self) -> str:
         return f"{self.tenant.slug}: {self.name}" if self.tenant else self.name
 
+    @property
+    def image_url(self) -> str | None:
+        return self.image.url if self.image else None
+
 
 class Product(TimeStampedModel):
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="products", null=True, blank=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="products",
+        null=True,
+        blank=True,
+    )
+
     category = models.ForeignKey(
         Category,
         on_delete=models.CASCADE,
@@ -51,8 +78,20 @@ class Product(TimeStampedModel):
     slug = models.SlugField(max_length=255, db_index=True)
 
     description = models.TextField(blank=True)
-    hero_image = models.URLField(blank=True, null=True)
-    image_urls = models.JSONField(default=list, blank=True)
+
+    hero_image = CloudinaryField(
+        "product_hero_image",
+        folder="gocart/products/hero",
+        transformation={
+            "width": 1200,
+            "height": 1200,
+            "crop": "fill",
+            "quality": "auto",
+            "fetch_format": "auto",
+        },
+        blank=True,
+        null=True,
+    )
 
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
@@ -79,33 +118,89 @@ class Product(TimeStampedModel):
         return self.title
 
     @property
+    def hero_image_url(self) -> str | None:
+        return self.hero_image.url if self.hero_image else None
+
+    @property
     def primary_image(self) -> str | None:
         if self.hero_image:
-            return self.hero_image
-        if isinstance(self.image_urls, list):
-            for image_url in self.image_urls:
-                if image_url:
-                    return image_url
+            return self.hero_image.url
+
+        first_image = self.images.filter(is_active=True).order_by("sort_order", "id").first()  # type: ignore[attr-defined]
+        if first_image and first_image.image:
+            return first_image.image.url
+
         return None
 
     @property
     def base_price(self):
-        first_variant = self.variants.filter(is_active=True).order_by("price").first()  # type: ignore
+        first_variant = self.variants.filter(is_active=True).order_by("price").first()  # type: ignore[attr-defined]
         return first_variant.price if first_variant else Decimal("0.00")
 
     @property
     def is_in_stock(self) -> bool:
-        return self.variants.filter(is_active=True, stock_quantity__gt=0).exists()  # type: ignore
+        return self.variants.filter(is_active=True, stock_quantity__gt=0).exists()  # type: ignore[attr-defined]
+
+
+class ProductImage(TimeStampedModel):
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="product_images",
+        null=True,
+        blank=True,
+    )
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="images",
+        db_index=True,
+    )
+
+    image = CloudinaryField(
+        "product_gallery_image",
+        folder="gocart/products/gallery",
+        transformation={
+            "width": 1200,
+            "height": 1200,
+            "crop": "limit",
+            "quality": "auto",
+            "fetch_format": "auto",
+        },
+    )
+
+    alt_text = models.CharField(max_length=255, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+        verbose_name = "Product Image"
+        verbose_name_plural = "Product Images"
+        indexes = [
+            models.Index(fields=["tenant", "product"]),
+            models.Index(fields=["tenant", "is_active"]),
+            models.Index(fields=["product", "is_active"]),
+            models.Index(fields=["product", "sort_order"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product.title} image"
+
+    @property
+    def image_url(self) -> str | None:
+        return self.image.url if self.image else None
+
+    def save(self, *args, **kwargs):
+        if self.product_id and not self.tenant_id:
+            self.tenant = self.product.tenant
+        super().save(*args, **kwargs)
 
 
 class ProductVariant(TimeStampedModel):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="product_variants", null=True, blank=True)
-    product = models.ForeignKey(
-        Product,
-        on_delete=models.CASCADE,
-        related_name="variants",
-        db_index=True,
-    )
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="variants", db_index=True)
 
     name = models.CharField(max_length=100)
     sku = models.CharField(max_length=100, db_index=True)
