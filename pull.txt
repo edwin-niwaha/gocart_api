@@ -8,3 +8,5 @@ git checkout main
 git pull origin main
 
 git checkout production-readiness
+
+git pull origin main --rebase
