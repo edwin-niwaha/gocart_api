@@ -38,12 +38,13 @@ def send_order_status_notifications_on_change(sender, instance: Order, created: 
 
     queue_order_status_notifications(instance.id, old_status, new_status)
 
-    send_order_notification(
-        user=instance.user,
-        order=instance,
-        title="Order status updated",
-        message=f"Your order {instance.slug} is now {instance.get_status_display()}",
-    )
+    if instance.user_id:
+        send_order_notification(
+            user=instance.user,
+            order=instance,
+            title="Order status updated",
+            message=f"Your order {instance.slug} is now {instance.get_status_display()}",
+        )
 
 
 @receiver(post_save, sender=Order)

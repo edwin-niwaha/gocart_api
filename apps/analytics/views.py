@@ -165,7 +165,7 @@ class AdminDashboardSummaryView(APIView):
                 "slug": order.slug,
                 "status": order.status,
                 "total_price": money(order.total_price),
-                "customer_email": order.user.email,
+                "customer_email": order.user.email if order.user_id else order.guest_email,
                 "created_at": order.created_at.isoformat(),
             }
             for order in orders.select_related("user").order_by("-created_at")[:10]

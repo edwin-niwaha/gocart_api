@@ -48,6 +48,12 @@ class ProductImageSerializer(serializers.ModelSerializer):
 
 class ProductVariantSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(),
+        required=False,
+    )
+    product_slug = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    product_title = serializers.CharField(source="product.title", read_only=True)
     sku = serializers.CharField(required=False, allow_blank=True)
     is_in_stock = serializers.ReadOnlyField()
 
@@ -56,6 +62,9 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "tenant",
+            "product",
+            "product_slug",
+            "product_title",
             "name",
             "sku",
             "price",
@@ -69,12 +78,37 @@ class ProductVariantSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "tenant",
+            "product_title",
             "created_at",
             "updated_at",
             "is_in_stock",
         )
         extra_kwargs = {"sku": {"required": False}}
         validators = []
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        request = self.context.get("request")
+        tenant = getattr(request, "tenant", None)
+        product_slug = attrs.pop("product_slug", "")
+        product = attrs.get("product")
+
+        if product is None and product_slug and tenant is not None:
+            try:
+                product = Product.objects.get(tenant=tenant, slug=product_slug)
+            except Product.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    {"product_slug": "Product was not found for this tenant."}
+                ) from exc
+            attrs["product"] = product
+
+        if self.context.get("require_product") and self.instance is None and product is None:
+            raise serializers.ValidationError({"product": "Product is required."})
+
+        if product is not None and tenant is not None and product.tenant_id != tenant.id:
+            raise serializers.ValidationError({"product": "Product does not belong to this tenant."})
+
+        return attrs
 
 
 

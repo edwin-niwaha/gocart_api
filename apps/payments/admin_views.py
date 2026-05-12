@@ -1,13 +1,10 @@
 from django.db.models import Q
-from django.utils import timezone
-
 from rest_framework import generics, status
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.orders.models import Order
 from apps.tenants.models import TenantMembership
 
 from .models import Payment
@@ -128,24 +125,7 @@ class AdminPaymentDetailView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
-        previous_status = payment.status
         updated_payment = serializer.save()
-
-        if (
-            updated_payment.status == Payment.Status.PAID
-            and previous_status != Payment.Status.PAID
-            and not updated_payment.paid_at
-        ):
-            updated_payment.paid_at = timezone.now()
-            updated_payment.save(update_fields=["paid_at", "updated_at"])
-
-        if (
-            updated_payment.order_id
-            and previous_status != Payment.Status.PAID
-            and updated_payment.status == Payment.Status.PAID
-        ):
-            updated_payment.order.status = Order.Status.PAID
-            updated_payment.order.save(update_fields=["status", "updated_at"])
 
         return Response(
             AdminPaymentSerializer(updated_payment, context={"request": request}).data,
