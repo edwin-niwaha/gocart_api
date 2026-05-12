@@ -1,7 +1,9 @@
+import logging
 from decimal import Decimal
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone
@@ -9,6 +11,8 @@ from django.utils import timezone
 from apps.common.models import TimeStampedModel
 from apps.orders.models import Order
 from apps.tenants.models import Tenant
+
+logger = logging.getLogger(__name__)
 
 
 class Payment(TimeStampedModel):
@@ -105,6 +109,20 @@ class Payment(TimeStampedModel):
         order = Order.objects.filter(pk=self.order_id).first()
         if not order:
             return
+
+        if self.amount != order.total_price:
+            logger.warning(
+                "Paid payment/order amount mismatch payment_id=%s order_id=%s payment_amount=%s order_total=%s",
+                self.pk,
+                order.pk,
+                self.amount,
+                order.total_price,
+            )
+            raise ValidationError(
+                {
+                    "amount": "Paid payment amount must match the linked order total."
+                }
+            )
 
         if order.status in {
             Order.Status.PAID,

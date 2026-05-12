@@ -56,6 +56,15 @@ def validate_card_payment_configuration() -> None:
     if not getattr(settings, "ENABLE_CARD_PAYMENTS", False):
         raise ValidationError({"detail": "Card payments are not enabled."})
 
+    gateway = str(getattr(settings, "CARD_PAYMENT_GATEWAY", "") or "").strip().lower()
+    if not getattr(settings, "DEBUG", False) and gateway in {"", "placeholder", "test"}:
+        raise ValidationError(
+            {
+                "detail": "Card payments require a production payment gateway.",
+                "missing_settings": ["CARD_PAYMENT_GATEWAY"],
+            }
+        )
+
     if not getattr(settings, "CARD_PAYMENT_GATEWAY_CHECKOUT_URL", ""):
         raise ValidationError(
             {

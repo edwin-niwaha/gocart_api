@@ -10,6 +10,7 @@ from .models import Category, Product, ProductImage, ProductVariant
 from .serializers import (
     CategorySerializer,
     ProductSerializer,
+    ProductVariantSerializer,
 )
 from .services import create_category, create_product, update_category, update_product
 
@@ -182,3 +183,36 @@ class ProductViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+
+class ProductVariantViewSet(viewsets.ModelViewSet):
+    serializer_class = ProductVariantSerializer
+    permission_classes = [IsTenantAdminOrReadOnly]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["product", "is_active"]
+    search_fields = ["name", "sku", "product__title", "product__slug"]
+    ordering_fields = ["created_at", "price", "stock_quantity", "sort_order"]
+    ordering = ["sort_order", "price", "id"]
+
+    def get_queryset(self):
+        tenant = self.request.tenant
+        queryset = ProductVariant.objects.select_related("tenant", "product").filter(
+            tenant=tenant
+        )
+
+        product_slug = self.request.query_params.get("product_slug")
+        if product_slug:
+            queryset = queryset.filter(product__slug=product_slug)
+
+        if user_is_tenant_staff(self.request.user, tenant):
+            return queryset
+
+        return queryset.filter(is_active=True, product__is_active=True)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["require_product"] = self.action == "create"
+        return context
+
+    def perform_create(self, serializer):
+        serializer.save(tenant=self.request.tenant)

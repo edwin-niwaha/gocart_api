@@ -37,6 +37,15 @@ class PaymentCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Payment amount must be greater than zero.")
         return value
 
+    def validate(self, attrs):
+        order = attrs.get("order")
+        amount = attrs.get("amount")
+        if order is not None and amount is not None and amount != order.total_price:
+            raise serializers.ValidationError(
+                {"amount": "Payment amount must match the order total."}
+            )
+        return attrs
+
     def create(self, validated_data):
         request = self.context["request"]
 
@@ -351,3 +360,16 @@ class AdminPaymentSerializer(serializers.ModelSerializer):
         if value not in allowed:
             raise serializers.ValidationError("Invalid payment status.")
         return value
+
+    def validate(self, attrs):
+        status = attrs.get("status", getattr(self.instance, "status", None))
+        if status == Payment.Status.PAID and self.instance and self.instance.order_id:
+            amount = attrs.get("amount", self.instance.amount)
+            order_total = self.instance.order.total_price
+            if amount != order_total:
+                raise serializers.ValidationError(
+                    {
+                        "amount": "Payment amount must match the linked order total before it can be marked paid."
+                    }
+                )
+        return attrs

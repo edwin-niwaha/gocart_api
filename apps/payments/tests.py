@@ -1,6 +1,7 @@
 import json
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from datetime import timedelta
@@ -658,6 +659,68 @@ class PaymentFinalizeSafetyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Order.objects.count(), 1)
         self.assertEqual(response.data["order"]["slug"], order.slug)
+
+    def test_paid_linked_payment_requires_matching_order_total(self):
+        order = Order.objects.create(
+            tenant=self.tenant,
+            user=self.user,
+            address=self.address,
+            status=Order.Status.PENDING,
+            slug="pending-mismatch-order",
+            total_price="2000.00",
+        )
+        payment = Payment.objects.create(
+            tenant=self.tenant,
+            user=self.user,
+            order=order,
+            provider=Payment.Provider.MTN,
+            status=Payment.Status.PROCESSING,
+            amount="1000.00",
+            currency=Payment.Currency.UGX,
+            provider_response={"address_id": self.address.id},
+        )
+
+        payment.status = Payment.Status.PAID
+        with self.assertRaises(DjangoValidationError):
+            payment.save()
+
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING)
+        self.assertEqual(payment.status, Payment.Status.PROCESSING)
+
+    def test_finalize_existing_paid_payment_rejects_order_amount_mismatch(self):
+        order = Order.objects.create(
+            tenant=self.tenant,
+            user=self.user,
+            address=self.address,
+            status=Order.Status.PENDING,
+            slug="paid-mismatch-order",
+            total_price="2000.00",
+        )
+        payment = Payment.objects.create(
+            tenant=self.tenant,
+            user=self.user,
+            order=order,
+            provider=Payment.Provider.CARD,
+            status=Payment.Status.PROCESSING,
+            amount="1000.00",
+            currency=Payment.Currency.UGX,
+            provider_response={"address_id": self.address.id},
+        )
+        Payment.objects.filter(pk=payment.pk).update(status=Payment.Status.PAID)
+
+        response = self.client.post(
+            f"/api/v1/payments/{payment.reference}/finalize-order/",
+            {},
+            format="json",
+            HTTP_X_TENANT_SLUG=self.tenant.slug,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("amount does not match", str(response.data))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING)
 
     def test_finalize_paid_payment_is_replay_safe_after_order_created(self):
         CartItem.objects.create(

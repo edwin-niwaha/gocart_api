@@ -66,21 +66,6 @@ def send_payment_notification(*, user, payment, title: str, message: str) -> Not
     )
 
 
-def send_shipping_notification(*, user, shipment, title: str, message: str) -> Notification:
-    return create_notification(
-        user=user,
-        tenant=shipment.order.tenant,
-        notification_type=Notification.NotificationType.SHIPPING,
-        title=title,
-        message=message,
-        data={
-            "shipment_id": shipment.id,
-            "order_slug": shipment.order.slug,
-            "tracking_number": shipment.tracking_number,
-        },
-    )
-
-
 def send_promotion_notification(*, user, coupon, title: str, message: str) -> Notification:
     return create_notification(
         user=user,

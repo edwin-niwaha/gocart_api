@@ -247,6 +247,18 @@ class FinalizePaidOrderView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, reference):
+        try:
+            payment_for_refresh = Payment.objects.get(
+                reference=reference,
+                user=request.user,
+                tenant=request.tenant,
+            )
+        except Payment.DoesNotExist:
+            raise NotFound("Payment not found.")
+
+        if payment_for_refresh.provider == Payment.Provider.MTN:
+            refresh_mtn_payment_status(payment_for_refresh)
+
         with transaction.atomic():
             try:
                 payment = (
@@ -260,9 +272,6 @@ class FinalizePaidOrderView(APIView):
                 )
             except Payment.DoesNotExist:
                 raise NotFound("Payment not found.")
-
-            if payment.provider == Payment.Provider.MTN:
-                payment = refresh_mtn_payment_status(payment)
 
             if payment.status == Payment.Status.PROCESSING:
                 raise ValidationError(
@@ -280,6 +289,12 @@ class FinalizePaidOrderView(APIView):
 
             if payment.order is not None:
                 order = payment.order
+                if payment.amount != order.total_price:
+                    raise ValidationError(
+                        {
+                            "detail": "Paid payment amount does not match the linked order total."
+                        }
+                    )
                 final_statuses = {
                     Order.Status.PAID,
                     Order.Status.SHIPPED,
